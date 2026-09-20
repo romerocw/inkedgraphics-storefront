@@ -61,7 +61,6 @@ def checkout(request):
                     quantity=i["qty"], unit_price=i["unit_price"],
                 )
             order.recalculate()
-        cart.clear()
         request.session.setdefault("my_orders", []).append(order.order_number)
         request.session.modified = True
         return redirect("order_pay", order_number=order.order_number)
