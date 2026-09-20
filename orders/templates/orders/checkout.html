@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Checkout{% endblock %}
+{% block content %}
+<h1>Checkout</h1>
+<p class="muted">{{ store.name }} · {{ items|length }} line(s) · ${{ cart.total }}</p>
+<form method="post" class="checkout-form">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" class="btn">Continue to payment</button>
+  <a href="{% url 'cart' %}" class="muted">Back to cart</a>
+</form>
+{% endblock %}

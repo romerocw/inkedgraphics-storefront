@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Payment{% endblock %}
+{% block content %}
+<h1>Order {{ order.order_number }}</h1>
+<p>Total due: <strong>${{ order.total }}</strong></p>
+<p class="muted">Payment isn't wired up yet — this is where Stripe Checkout will go.</p>
+<a href="{% url 'order_detail' order.order_number %}" class="btn btn-secondary">View order</a>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Order {{ order.order_number }}{% endblock %}
+{% block content %}
+<h1>Order {{ order.order_number }}</h1>
+<p><strong>{{ order.get_status_display }}</strong> · {{ order.store.name }} · placed {{ order.created_at|date:"F j, Y g:i a" }}</p>
+<table class="cart">
+  <tr><th>Item</th><th>Size</th><th>Qty</th><th>Price</th></tr>
+  {% for i in order.items.all %}
+  <tr><td>{{ i.product_name }}</td><td>{{ i.variant_label }}</td><td>{{ i.quantity }}</td><td>${{ i.line_total }}</td></tr>
+  {% endfor %}
+  <tr class="total"><td colspan="3">Total</td><td>${{ order.total }}</td></tr>
+</table>
+<p>Buyer: {{ order.buyer_name }} ({{ order.buyer_email }}){% if order.recipient_name %} · For: {{ order.recipient_name }}{% endif %}</p>
+{% endblock %}

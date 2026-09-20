@@ -8,9 +8,12 @@
 </head>
 <body>
   <header class="site-header">
-    <div class="container">{% block header %}<a href="/" class="brand">Inked Graphics</a>{% endblock %}</div>
+    <div class="container">{% block header %}<a href="/" class="brand">Inked Graphics</a>{% endblock %} <a href="{% url 'cart' %}" class="cart-link">Cart</a></div>
   </header>
-  <main class="container">{% block content %}{% endblock %}</main>
+  <main class="container">
+    {% if messages %}{% for m in messages %}<div class="msg msg-{{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
+    {% block content %}{% endblock %}
+  </main>
   <footer class="site-footer"><div class="container">Powered by Inked Graphics</div></footer>
 </body>
 </html>

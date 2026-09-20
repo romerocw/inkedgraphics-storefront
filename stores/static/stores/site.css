@@ -12,3 +12,17 @@ main{padding:2rem 0;min-height:60vh}
 .price{font-weight:700;font-size:1.25rem;margin:.5rem 0}
 .variants{list-style:none;padding:0;margin:0;font-size:.9rem}
 .variants li{display:inline-block;background:#f3f4f6;border-radius:.25rem;padding:.15rem .5rem;margin:.15rem .25rem .15rem 0}
+.cart-link{float:right;color:#fff;text-decoration:none;font-weight:600}
+.msg{padding:.75rem 1rem;border-radius:.375rem;margin-bottom:1rem;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
+.msg-error{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+.btn{display:inline-block;background:#111827;color:#fff;border:0;border-radius:.375rem;padding:.6rem 1.1rem;font-weight:600;text-decoration:none;cursor:pointer;margin-right:.5rem}
+.btn-secondary{background:#e5e7eb;color:#111827}
+.buy-form label{display:block;margin:.4rem 0;font-size:.9rem}
+.buy-form select,.buy-form input,.checkout-form input,.checkout-form textarea{width:100%;padding:.45rem;border:1px solid #d1d5db;border-radius:.375rem;margin-top:.15rem;font:inherit}
+.buy-form .btn{margin-top:.5rem}
+.checkout-form{max-width:480px}
+.checkout-form p{margin:.6rem 0}
+table.cart{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;margin:1rem 0}
+table.cart th,table.cart td{padding:.6rem .75rem;border-bottom:1px solid #e5e7eb;text-align:left}
+table.cart .total td{font-weight:700;border-bottom:0}
+input.qty{width:4rem}
