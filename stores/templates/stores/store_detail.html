@@ -13,7 +13,7 @@
       <p class="price">${{ item.price }}</p>
       <ul class="variants">
       {% for v in item.product.variants.all %}{% if v.is_active %}
-        <li>{{ v.color }} {{ v.size }}{% if v.price_adjustment %} <span class="muted">(+${{ v.price_adjustment }})</span>{% endif %}</li>
+        <li>{{ v.color }} {{ v.size }}{% if v.upcharge %} <span class="muted">(+${{ v.upcharge }})</span>{% endif %}</li>
       {% endif %}{% endfor %}
       </ul>
     </div>

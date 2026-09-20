@@ -9,7 +9,14 @@ class Product(models.Model):
     name = models.CharField(max_length=200)
     sku_prefix = models.CharField(max_length=20, unique=True, help_text="e.g. HOOD-U")
     description = models.TextField(blank=True)
-    base_price = models.DecimalField(max_digits=8, decimal_places=2)
+    default_price = models.DecimalField(
+        max_digits=8, decimal_places=2,
+        help_text="Usual retail price. Pre-fills the store price; each store can override.",
+    )
+    cost = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        help_text="Your cost (blank + decoration). Internal only; never shown to buyers.",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -28,9 +35,9 @@ class ProductVariant(models.Model):
     color = models.CharField(max_length=50, blank=True)
     size = models.CharField(max_length=20, blank=True)
     sku = models.CharField(max_length=40, unique=True)
-    price_adjustment = models.DecimalField(
+    upcharge = models.DecimalField(
         max_digits=8, decimal_places=2, default=0,
-        help_text="Added to the store price, e.g. +2.00 for 2XL.",
+        help_text="Extra charged for this size only, e.g. 2.00 for 2XL. Leave 0 for standard sizes.",
     )
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveSmallIntegerField(default=0)

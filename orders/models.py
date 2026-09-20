@@ -82,5 +82,5 @@ class OrderItem(models.Model):
         if not self.sku:
             self.sku = self.variant.sku
         if self.unit_price is None:
-            self.unit_price = self.store_product.price + self.variant.price_adjustment
+            self.unit_price = self.store_product.price + self.variant.upcharge
         super().save(*args, **kwargs)
