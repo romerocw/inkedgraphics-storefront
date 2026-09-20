@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ store.name }}{% endblock %}
+{% block header %}<span class="brand">{{ store.client.name }}</span>{% endblock %}
+{% block content %}
+<h1>{{ store.name }}</h1>
+{% if is_open %}
+  {% if store.closes_at %}<p class="muted">Store closes {{ store.closes_at|date:"F j, Y" }}.</p>{% endif %}
+  <div class="grid">
+  {% for item in offerings %}
+    <div class="card">
+      <h2>{{ item.name }}</h2>
+      {% if item.product.description %}<p>{{ item.product.description }}</p>{% endif %}
+      <p class="price">${{ item.price }}</p>
+      <ul class="variants">
+      {% for v in item.product.variants.all %}{% if v.is_active %}
+        <li>{{ v.color }} {{ v.size }}{% if v.price_adjustment %} <span class="muted">(+${{ v.price_adjustment }})</span>{% endif %}</li>
+      {% endif %}{% endfor %}
+      </ul>
+    </div>
+  {% empty %}
+    <p class="muted">Nothing is listed in this store yet.</p>
+  {% endfor %}
+  </div>
+{% elif store.status == "scheduled" %}
+  <p>This store opens {% if store.opens_at %}{{ store.opens_at|date:"F j, Y" }}{% else %}soon{% endif %}.</p>
+{% else %}
+  <p>This store is closed.</p>
+{% endif %}
+{% endblock %}

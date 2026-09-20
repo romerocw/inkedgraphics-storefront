@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Open stores</h1>
+{% for store in stores %}
+  <p><a href="{% url 'store_detail' store.slug %}">{{ store.name }}</a> <span class="muted">— {{ store.client }}</span></p>
+{% empty %}
+  <p class="muted">No stores are open right now.</p>
+{% endfor %}
+{% endblock %}
