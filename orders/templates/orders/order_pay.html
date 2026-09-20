@@ -1,9 +1,0 @@
-{% extends "base.html" %}
-{% block title %}Payment{% endblock %}
-{% block header %}<a href="{% url 'store_detail' store.slug %}" class="flex items-center gap-3">{% if brand.logo %}<img src="{{ brand.logo.url }}" alt="" class="h-10 w-auto">{% endif %}<span class="text-xl font-bold">{{ brand.name }}</span></a>{% endblock %}
-{% block content %}
-<h1 class="text-2xl font-bold">Order {{ order.order_number }}</h1>
-<p class="mt-2">Total due: <strong>${{ order.total }}</strong></p>
-<p class="muted my-4">Payment isn't wired up yet — this is where Stripe Checkout will go.</p>
-<a href="{% url 'order_detail' order.order_number %}" class="btn btn-secondary">View order</a>
-{% endblock %}

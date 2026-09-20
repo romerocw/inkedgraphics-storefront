@@ -32,6 +32,7 @@ class Order(models.Model):
 
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    stripe_checkout_session = models.CharField(max_length=100, blank=True)
     stripe_payment_intent = models.CharField(max_length=100, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
 
@@ -84,3 +85,16 @@ class OrderItem(models.Model):
         if self.unit_price is None:
             self.unit_price = self.store_product.price + self.variant.upcharge
         super().save(*args, **kwargs)
+
+
+def mark_paid(order, payment_intent=""):
+    """Idempotent: safe to call from both the success page and the webhook."""
+    from django.utils import timezone
+
+    if order.status == Order.Status.PENDING:
+        order.status = Order.Status.PAID
+        order.paid_at = timezone.now()
+        if payment_intent:
+            order.stripe_payment_intent = payment_intent
+        order.save(update_fields=["status", "paid_at", "stripe_payment_intent", "updated_at"])
+    return order

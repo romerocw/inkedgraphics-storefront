@@ -73,13 +73,6 @@ def _my_order(request, order_number):
     return get_object_or_404(Order.objects.select_related("store"), order_number=order_number)
 
 
-def order_pay(request, order_number):
-    """Placeholder until Stripe Checkout is wired in."""
-    order = _my_order(request, order_number)
-    if order is None:
-        return redirect("cart")
-    return render(request, "orders/order_pay.html", {"order": order, "store": order.store, "brand": order.store.client})
-
 
 def order_detail(request, order_number):
     order = _my_order(request, order_number)
