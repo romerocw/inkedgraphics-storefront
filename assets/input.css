@@ -17,6 +17,6 @@
   table.cart th, table.cart td { @apply border-b border-gray-200 px-3 py-2 text-left; }
   table.cart .total td { @apply border-b-0 font-bold; }
   .checkout-form p { @apply my-3; }
-  .checkout-form label { @apply label; }
-  .checkout-form input, .checkout-form textarea { @apply input; }
+  .checkout-form label { @apply block text-sm font-medium text-gray-700; }
+  .checkout-form input, .checkout-form textarea { @apply mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand focus:outline-none; }
 }
