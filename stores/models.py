@@ -39,6 +39,10 @@ class Store(models.Model):
         help_text="Optional: <subdomain>.inkedgraphics.com for clients who want their own host.",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    primary_color = models.CharField(
+        max_length=7, blank=True,
+        help_text="Hex color for this store, e.g. #228B22. Blank = use the client's color.",
+    )
     opens_at = models.DateTimeField(null=True, blank=True)
     closes_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

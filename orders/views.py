@@ -79,11 +79,11 @@ def order_pay(request, order_number):
     order = _my_order(request, order_number)
     if order is None:
         return redirect("cart")
-    return render(request, "orders/order_pay.html", {"order": order, "brand": order.store.client})
+    return render(request, "orders/order_pay.html", {"order": order, "store": order.store, "brand": order.store.client})
 
 
 def order_detail(request, order_number):
     order = _my_order(request, order_number)
     if order is None:
         return redirect("cart")
-    return render(request, "orders/order_detail.html", {"order": order, "brand": order.store.client})
+    return render(request, "orders/order_detail.html", {"order": order, "store": order.store, "brand": order.store.client})

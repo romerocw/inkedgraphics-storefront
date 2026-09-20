@@ -6,7 +6,7 @@
   <title>{% block title %}Inked Graphics Stores{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'stores/site.css' %}">
 </head>
-<body class="flex min-h-full flex-col text-gray-800"{% if brand %} style="--color-brand: {{ brand.primary_color }}"{% endif %}>
+<body class="flex min-h-full flex-col text-gray-800"{% if brand %} style="--color-brand: {% firstof store.primary_color brand.primary_color %}"{% endif %}>
   <header class="bg-brand text-white">
     <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
       {% block header %}<a href="/" class="text-xl font-bold">Inked Graphics</a>{% endblock %}

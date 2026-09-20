@@ -12,7 +12,7 @@ class ClientAdmin(admin.ModelAdmin):
 
 @admin.register(Store)
 class StoreAdmin(admin.ModelAdmin):
-    list_display = ("name", "client", "status", "opens_at", "closes_at")
+    list_display = ("name", "client", "status", "primary_color", "opens_at", "closes_at")
     list_filter = ("status", "client")
     search_fields = ("name", "slug", "client__name")
     prepopulated_fields = {"slug": ("name",)}
