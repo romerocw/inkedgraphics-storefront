@@ -21,5 +21,5 @@ def store_detail(request, slug):
     return render(
         request,
         "stores/store_detail.html",
-        {"store": store, "offerings": offerings, "is_open": store.status == Store.Status.OPEN, "now": timezone.now()},
+        {"store": store, "brand": store.client, "offerings": offerings, "is_open": store.status == Store.Status.OPEN, "now": timezone.now()},
     )

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Order {{ order.order_number }}{% endblock %}
+{% block header %}<span class="text-xl font-bold">{{ brand.name }}</span>{% endblock %}
 {% block content %}
-<h1>Order {{ order.order_number }}</h1>
-<p><strong>{{ order.get_status_display }}</strong> · {{ order.store.name }} · placed {{ order.created_at|date:"F j, Y g:i a" }}</p>
+<h1 class="text-2xl font-bold">Order {{ order.order_number }}</h1>
+<p class="mt-2"><strong>{{ order.get_status_display }}</strong> · {{ order.store.name }} · placed {{ order.created_at|date:"F j, Y g:i a" }}</p>
 <table class="cart">
   <tr><th>Item</th><th>Size</th><th>Qty</th><th>Price</th></tr>
   {% for i in order.items.all %}

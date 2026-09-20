@@ -1,12 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Checkout{% endblock %}
+{% block header %}<span class="text-xl font-bold">{{ brand.name }}</span>{% endblock %}
 {% block content %}
-<h1>Checkout</h1>
+<h1 class="text-2xl font-bold">Checkout</h1>
 <p class="muted">{{ store.name }} · {{ items|length }} line(s) · ${{ cart.total }}</p>
-<form method="post" class="checkout-form">
+<form method="post" class="checkout-form mt-4 max-w-md">
   {% csrf_token %}
   {{ form.as_p }}
-  <button type="submit" class="btn">Continue to payment</button>
-  <a href="{% url 'cart' %}" class="muted">Back to cart</a>
+  <div class="mt-4 flex items-center gap-3">
+    <button type="submit" class="btn">Continue to payment</button>
+    <a href="{% url 'cart' %}" class="muted hover:underline">Back to cart</a>
+  </div>
 </form>
 {% endblock %}

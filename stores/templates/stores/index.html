@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Open stores</h1>
+<h1 class="mb-4 text-2xl font-bold">Open stores</h1>
 {% for store in stores %}
-  <p><a href="{% url 'store_detail' store.slug %}">{{ store.name }}</a> <span class="muted">— {{ store.client }}</span></p>
+  <p class="my-2"><a href="{% url 'store_detail' store.slug %}" class="font-semibold text-brand hover:underline">{{ store.name }}</a> <span class="muted">— {{ store.client }}</span></p>
 {% empty %}
   <p class="muted">No stores are open right now.</p>
 {% endfor %}

@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Your cart{% endblock %}
+{% block header %}<span class="text-xl font-bold">{% if brand %}{{ brand.name }}{% else %}Inked Graphics{% endif %}</span>{% endblock %}
 {% block content %}
-<h1>Your cart</h1>
+<h1 class="text-2xl font-bold">Your cart</h1>
 {% if items %}
   <p class="muted">{{ store.name }}</p>
   <form method="post" action="{% url 'cart_update' %}">
@@ -13,17 +14,19 @@
         <td>{{ i.store_product.name }}</td>
         <td>{{ i.variant.color }} {{ i.variant.size }}</td>
         <td>${{ i.unit_price }}</td>
-        <td><input type="number" name="qty:{{ i.key }}" value="{{ i.qty }}" min="0" max="20" class="qty"></td>
+        <td><input type="number" name="qty:{{ i.key }}" value="{{ i.qty }}" min="0" max="20" class="input w-20"></td>
         <td>${{ i.line_total }}</td>
       </tr>
       {% endfor %}
       <tr class="total"><td colspan="4">Total</td><td>${{ cart.total }}</td></tr>
     </table>
-    <button type="submit" class="btn btn-secondary">Update quantities</button>
-    <a href="{% url 'checkout' %}" class="btn">Checkout</a>
-    <a href="{% url 'store_detail' store.slug %}" class="muted">Continue shopping</a>
+    <div class="flex flex-wrap items-center gap-3">
+      <button type="submit" class="btn btn-secondary">Update quantities</button>
+      <a href="{% url 'checkout' %}" class="btn">Checkout</a>
+      <a href="{% url 'store_detail' store.slug %}" class="muted hover:underline">Continue shopping</a>
+    </div>
   </form>
 {% else %}
-  <p class="muted">Your cart is empty.</p>
+  <p class="muted mt-2">Your cart is empty.</p>
 {% endif %}
 {% endblock %}

@@ -5,7 +5,7 @@ from .models import Client, Store
 
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "contact_email", "created_at")
+    list_display = ("name", "slug", "primary_color", "contact_email", "created_at")
     search_fields = ("name", "contact_email")
     prepopulated_fields = {"slug": ("name",)}
 

@@ -28,7 +28,7 @@ def cart_add(request, slug):
 def cart_view(request):
     cart = Cart(request)
     store = Store.objects.filter(id=cart.store_id).first() if cart.store_id else None
-    return render(request, "orders/cart.html", {"cart": cart, "items": list(cart.items()), "store": store})
+    return render(request, "orders/cart.html", {"cart": cart, "items": list(cart.items()), "store": store, "brand": store.client if store else None})
 
 
 @require_POST
@@ -65,7 +65,7 @@ def checkout(request):
         request.session.setdefault("my_orders", []).append(order.order_number)
         request.session.modified = True
         return redirect("order_pay", order_number=order.order_number)
-    return render(request, "orders/checkout.html", {"form": form, "items": items, "cart": cart, "store": store})
+    return render(request, "orders/checkout.html", {"form": form, "items": items, "cart": cart, "store": store, "brand": store.client})
 
 
 def _my_order(request, order_number):
@@ -79,11 +79,11 @@ def order_pay(request, order_number):
     order = _my_order(request, order_number)
     if order is None:
         return redirect("cart")
-    return render(request, "orders/order_pay.html", {"order": order})
+    return render(request, "orders/order_pay.html", {"order": order, "brand": order.store.client})
 
 
 def order_detail(request, order_number):
     order = _my_order(request, order_number)
     if order is None:
         return redirect("cart")
-    return render(request, "orders/order_detail.html", {"order": order})
+    return render(request, "orders/order_detail.html", {"order": order, "brand": order.store.client})

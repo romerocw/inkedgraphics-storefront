@@ -9,6 +9,10 @@ class Client(models.Model):
     contact_name = models.CharField(max_length=200, blank=True)
     contact_email = models.EmailField(blank=True)
     notes = models.TextField(blank=True)
+    primary_color = models.CharField(
+        max_length=7, default="#111827",
+        help_text="Hex color for the store header and buttons, e.g. #1e3a8a.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

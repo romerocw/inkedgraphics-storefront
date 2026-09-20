@@ -1,19 +1,22 @@
 {% load static %}<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full bg-gray-50">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Inked Graphics Stores{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'stores/site.css' %}">
 </head>
-<body>
-  <header class="site-header">
-    <div class="container">{% block header %}<a href="/" class="brand">Inked Graphics</a>{% endblock %} <a href="{% url 'cart' %}" class="cart-link">Cart</a></div>
+<body class="flex min-h-full flex-col text-gray-800"{% if brand %} style="--color-brand: {{ brand.primary_color }}"{% endif %}>
+  <header class="bg-brand text-white">
+    <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+      {% block header %}<a href="/" class="text-xl font-bold">Inked Graphics</a>{% endblock %}
+      <a href="{% url 'cart' %}" class="font-semibold hover:underline">Cart</a>
+    </div>
   </header>
-  <main class="container">
-    {% if messages %}{% for m in messages %}<div class="msg msg-{{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
+  <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+    {% for m in messages %}<div class="mb-4 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-green-800">{{ m }}</div>{% endfor %}
     {% block content %}{% endblock %}
   </main>
-  <footer class="site-footer"><div class="container">Powered by Inked Graphics</div></footer>
+  <footer class="py-8 text-sm text-gray-500"><div class="mx-auto max-w-5xl px-4">Powered by Inked Graphics</div></footer>
 </body>
 </html>
