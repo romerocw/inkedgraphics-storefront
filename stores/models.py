@@ -9,6 +9,7 @@ class Client(models.Model):
     contact_name = models.CharField(max_length=200, blank=True)
     contact_email = models.EmailField(blank=True)
     notes = models.TextField(blank=True)
+    logo = models.ImageField(upload_to="clients/logos/", blank=True, help_text="Shown in the store header.")
     primary_color = models.CharField(
         max_length=7, default="#111827",
         help_text="Hex color for the store header and buttons, e.g. #1e3a8a.",

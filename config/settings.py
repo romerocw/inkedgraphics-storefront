@@ -165,3 +165,17 @@ STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"},
 }
+
+# Media (uploads) live in S3 under media/; bucket is private, URLs are signed.
+STORAGES["default"] = {
+    "BACKEND": "storages.backends.s3.S3Storage",
+    "OPTIONS": {
+        "bucket_name": os.environ["AWS_STORAGE_BUCKET_NAME"],
+        "region_name": "us-east-2",
+        "location": "media",
+        "default_acl": None,
+        "querystring_auth": True,
+        "querystring_expire": 3600,
+        "file_overwrite": False,
+    },
+}

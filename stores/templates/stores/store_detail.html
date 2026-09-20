@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ store.name }}{% endblock %}
-{% block header %}<span class="text-xl font-bold">{{ brand.name }}</span>{% endblock %}
+{% block header %}<a href="{% url 'store_detail' store.slug %}" class="flex items-center gap-3">{% if brand.logo %}<img src="{{ brand.logo.url }}" alt="" class="h-10 w-auto">{% endif %}<span class="text-xl font-bold">{{ brand.name }}</span></a>{% endblock %}
 {% block content %}
 <h1 class="text-2xl font-bold">{{ store.name }}</h1>
 {% if is_open %}
@@ -8,6 +8,7 @@
   <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
   {% for item in offerings %}
     <div class="card">
+      {% if item.product.image %}<img src="{{ item.product.image.url }}" alt="" class="mb-3 aspect-square w-full rounded-md object-cover">{% endif %}
       <h2 class="text-lg font-semibold">{{ item.name }}</h2>
       {% if item.product.description %}<p class="mt-1 text-sm text-gray-600">{{ item.product.description }}</p>{% endif %}
       <p class="my-3 text-xl font-bold">${{ item.price }}</p>
