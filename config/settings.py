@@ -172,6 +172,7 @@ STORAGES["default"] = {
     "OPTIONS": {
         "bucket_name": os.environ["AWS_STORAGE_BUCKET_NAME"],
         "region_name": "us-east-2",
+        "endpoint_url": "https://s3.us-east-2.amazonaws.com",
         "location": "media",
         "default_acl": None,
         "querystring_auth": True,
