@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "stores",
     "catalog",
     "orders",
+    "console",
 ]
 
 MIDDLEWARE = [
@@ -184,3 +185,6 @@ STORAGES["default"] = {
 STRIPE_PUBLISHABLE_KEY = os.environ["STRIPE_PUBLISHABLE_KEY"]
 STRIPE_SECRET_KEY = os.environ["STRIPE_SECRET_KEY"]
 STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
+
+LOGIN_URL = "/console/login/"
+LOGIN_REDIRECT_URL = "/console/"

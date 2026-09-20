@@ -1,0 +1,31 @@
+{% extends "console/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1 class="mb-6 text-2xl font-bold">Dashboard</h1>
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  <div class="card"><div class="muted text-sm">Clients</div><div class="text-3xl font-bold">{{ clients }}</div></div>
+  <div class="card"><div class="muted text-sm">Open stores</div><div class="text-3xl font-bold">{{ open_stores }}</div></div>
+  <div class="card"><div class="muted text-sm">Paid orders (7 days / all)</div><div class="text-3xl font-bold">{{ orders_week }} <span class="muted text-lg">/ {{ orders_total }}</span></div></div>
+  <div class="card"><div class="muted text-sm">Revenue (7 days / all)</div><div class="text-3xl font-bold">${{ revenue_week|floatformat:2 }} <span class="muted text-lg">/ ${{ revenue_total|floatformat:2 }}</span></div></div>
+</div>
+<div class="mt-8 grid gap-6 lg:grid-cols-2">
+  <div>
+    <h2 class="mb-2 text-lg font-semibold">Recent paid orders</h2>
+    <table class="cart">
+      <tr><th>Order</th><th>Store</th><th>Buyer</th><th>Total</th><th>Paid</th></tr>
+      {% for o in recent_orders %}
+      <tr><td>{{ o.order_number }}</td><td>{{ o.store.name }}</td><td>{{ o.buyer_name }}</td><td>${{ o.total }}</td><td>{{ o.paid_at|date:"M j, g:i a" }}</td></tr>
+      {% empty %}<tr><td colspan="5" class="muted">No paid orders yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div>
+    <h2 class="mb-2 text-lg font-semibold">Stores closing within 7 days</h2>
+    <table class="cart">
+      <tr><th>Store</th><th>Client</th><th>Closes</th></tr>
+      {% for s in closing_soon %}
+      <tr><td><a href="{% url 'console:store_edit' s.pk %}" class="text-brand hover:underline">{{ s.name }}</a></td><td>{{ s.client.name }}</td><td>{{ s.closes_at|date:"M j, g:i a" }}</td></tr>
+      {% empty %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+{% endblock %}

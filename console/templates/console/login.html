@@ -1,0 +1,14 @@
+{% extends "console/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-sm card">
+  <h1 class="mb-4 text-xl font-bold">Sign in</h1>
+  {% if form.errors %}<p class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">Wrong username or password.</p>{% endif %}
+  <form method="post">{% csrf_token %}
+    <label class="label">Username <input type="text" name="username" autofocus required class="input"></label>
+    <label class="label mt-3">Password <input type="password" name="password" required class="input"></label>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="btn mt-5 w-full">Sign in</button>
+  </form>
+</div>
+{% endblock %}

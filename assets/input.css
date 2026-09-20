@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @source "../stores/templates/**/*.html";
 @source "../orders/templates/**/*.html";
+@source "../console/templates/**/*.html";
 
 @theme {
   --color-brand: #111827;

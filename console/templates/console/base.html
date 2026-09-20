@@ -1,0 +1,34 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-100">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Console{% endblock %} · Inked Graphics</title>
+  <link rel="stylesheet" href="{% static 'stores/site.css' %}">
+</head>
+<body class="flex min-h-full flex-col text-gray-800">
+  <header class="bg-gray-900 text-white">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+      <div class="flex items-center gap-6">
+        <a href="{% url 'console:dashboard' %}" class="text-lg font-bold">Inked Graphics Console</a>
+        {% if user.is_authenticated %}
+        <nav class="flex gap-4 text-sm">
+          <a href="{% url 'console:dashboard' %}" class="hover:underline">Dashboard</a>
+          <a href="{% url 'console:clients' %}" class="hover:underline">Clients</a>
+          <a href="{% url 'console:stores' %}" class="hover:underline">Stores</a>
+        </nav>
+        {% endif %}
+      </div>
+      {% if user.is_authenticated %}
+      <form method="post" action="{% url 'console:logout' %}" class="text-sm">{% csrf_token %}
+        <span class="muted mr-3 text-gray-400">{{ user.get_username }}</span><button type="submit" class="hover:underline">Sign out</button>
+      </form>
+      {% endif %}
+    </div>
+  </header>
+  <main class="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+    {% for m in messages %}<div class="mb-4 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-green-800">{{ m }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
