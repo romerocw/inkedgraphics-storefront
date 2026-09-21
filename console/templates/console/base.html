@@ -18,7 +18,8 @@
           <a href="{% url 'console:stores' %}" class="hover:underline">Stores</a>
           <a href="{% url 'console:orders' %}" class="hover:underline">Orders</a>
           <a href="{% url 'console:products' %}" class="hover:underline">Products</a>
-          {% if can_manage_team %}<a href="{% url 'console:team' %}" class="hover:underline">Team</a>{% endif %}
+          {% if can_manage_team %}<a href="{% url 'console:team' %}" class="hover:underline">Team</a>
+          <a href="{% url 'console:emails' %}" class="hover:underline">Emails</a>{% endif %}
         </nav>
         {% endif %}
       </div>

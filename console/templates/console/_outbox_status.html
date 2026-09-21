@@ -1,0 +1,1 @@
+<span class="rounded px-2 py-0.5 text-xs font-semibold {% if email.status == 'sent' %}bg-green-100 text-green-800{% elif email.status == 'queued' %}bg-yellow-100 text-yellow-800{% else %}bg-red-100 text-red-800{% endif %}">{% if email.gave_up %}Failed — gave up{% elif email.status == 'failed' %}Failed — will retry{% else %}{{ email.get_status_display }}{% endif %}</span>

@@ -556,6 +556,7 @@ class ConsoleAccessTests(TestCase):
             "orders_bulk": [],
             "order_detail": [self.order.order_number],
             "order_status": [self.order.order_number],
+            "order_resend_confirmation": [self.order.order_number],
             "products": [],
             "product_new": [],
             "product_edit": [self.product.pk],
@@ -564,6 +565,8 @@ class ConsoleAccessTests(TestCase):
             "team_member": [self.colleague.pk],
             "team_member_status": [self.colleague.pk],
             "team_resend_invite": [self.colleague.pk],
+            "emails": [],
+            "email_retry": [1],
         }
 
     def test_every_console_page_is_in_this_test(self):
@@ -594,7 +597,7 @@ class ConsoleAccessTests(TestCase):
         self.client.force_login(make_owner())
         post_only = {
             "store_products", "store_products_add", "orders_bulk", "order_status",
-            "team_member_status", "team_resend_invite",
+            "team_member_status", "team_resend_invite", "order_resend_confirmation", "email_retry",
         }
         for name, args in self.staff_urls().items():
             if name in post_only:

@@ -1,0 +1,52 @@
+{% extends "console/base.html" %}
+{% block title %}Emails{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <h1 class="text-2xl font-bold">Emails</h1>
+  <p class="muted text-sm">Everything the shop has emailed, or is about to. Queued emails go out within a minute or two; failed ones are retried automatically up to 5 times.</p>
+</div>
+<form method="get" class="card mb-4 flex flex-wrap items-end gap-4">
+  <div>
+    <label for="email-status" class="label">Status</label>
+    <select id="email-status" name="status" class="input">
+      <option value="">All</option>
+      {% for value, label in statuses %}<option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn">Filter</button>
+    <a href="{% url 'console:emails' %}" class="muted hover:underline">Clear</a>
+  </div>
+</form>
+<table class="cart">
+  <tr><th>Queued</th><th>Kind</th><th>To</th><th>Subject</th><th>Status</th><th>Attempts</th><th>Sent</th><th></th></tr>
+  {% for email in emails %}
+  <tr>
+    <td class="whitespace-nowrap">{{ email.created_at|date:"M j, Y g:i a" }}</td>
+    <td class="muted">{{ email.kind }}</td>
+    <td>{% if email.to_name %}{{ email.to_name }}<br><span class="muted text-xs">{{ email.to_email }}</span>{% else %}{{ email.to_email }}{% endif %}</td>
+    <td>{{ email.subject }}{% if email.last_error %}<br><span class="text-xs text-red-800 break-all">{{ email.last_error }}</span>{% endif %}</td>
+    <td>{% include "console/_outbox_status.html" %}</td>
+    <td>{{ email.attempts }}</td>
+    <td class="whitespace-nowrap">{{ email.sent_at|date:"M j, Y g:i a"|default:"—" }}</td>
+    <td class="text-right whitespace-nowrap">
+      {% if email.status == "failed" %}
+      <form method="post" action="{% url 'console:email_retry' email.pk %}" class="inline">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" class="text-brand hover:underline">Retry</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="8" class="muted">{% if status %}No emails with that status.{% else %}Nothing has been emailed yet.{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% if page_obj.has_other_pages %}
+<div class="mt-4 flex items-center gap-3 text-sm">
+  {% if page_obj.has_previous %}<a href="?{% if status_query %}{{ status_query }}&{% endif %}page={{ page_obj.previous_page_number }}" class="text-brand hover:underline">&larr; Newer</a>{% endif %}
+  <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} · {{ page_obj.paginator.count }} email{{ page_obj.paginator.count|pluralize }}</span>
+  {% if page_obj.has_next %}<a href="?{% if status_query %}{{ status_query }}&{% endif %}page={{ page_obj.next_page_number }}" class="text-brand hover:underline">Older &rarr;</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -29,6 +29,9 @@ from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
 from catalog.models import Product, StoreProduct
+from messaging.models import OutboxEmail
+from messaging.outbox import emails_about, retry
+from orders.emails import ORDER_CONFIRMATION, queue_order_confirmation
 from orders.models import Order, allowed_transitions, change_status
 from stores.models import Client, Store
 
@@ -402,8 +405,23 @@ class OrderDetailView(StaffRequiredMixin, DetailView):
         ctx.update(
             moves=[(status, Order.Status(status).label) for status in moves if status != Order.Status.CANCELLED],
             can_cancel=Order.Status.CANCELLED in moves,
+            can_resend_confirmation=self.object.status == Order.Status.PAID,
+            confirmations=emails_about(self.object).filter(kind=ORDER_CONFIRMATION),
         )
         return ctx
+
+
+class OrderResendConfirmationView(StaffRequiredMixin, View):
+    """Queue the buyer's confirmation email again. Paid orders only."""
+
+    def post(self, request, order_number):
+        order = get_object_or_404(Order.objects.select_related("store__client"), order_number=order_number)
+        if order.status != Order.Status.PAID:
+            messages.error(request, "Only paid orders can have their confirmation re-sent.")
+        else:
+            queue_order_confirmation(order)
+            messages.success(request, f"Confirmation email queued for {order.buyer_email}. It goes out within a minute or two.")
+        return redirect("console:order_detail", order_number=order.order_number)
 
 
 class OrderStatusView(StaffRequiredMixin, View):
@@ -511,6 +529,47 @@ class TeamRequiredMixin(StaffRequiredMixin):
 
     def test_func(self):
         return super().test_func() and can_manage_team(self.request.user)
+
+
+class OutboxListView(TeamRequiredMixin, ListView):
+    """Every email the outbox has queued, for troubleshooting delivery."""
+
+    template_name = "console/outbox_list.html"
+    context_object_name = "emails"
+    paginate_by = 50
+
+    def status(self):
+        status = self.request.GET.get("status") or ""
+        return status if status in OutboxEmail.Status.values else ""
+
+    def get_queryset(self):
+        emails = OutboxEmail.objects.order_by("-created_at", "-pk")
+        return emails.filter(status=self.status()) if self.status() else emails
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx.update(
+            status=self.status(),
+            statuses=OutboxEmail.Status.choices,
+            status_query=urlencode({"status": self.status()}) if self.status() else "",
+        )
+        return ctx
+
+
+class OutboxRetryView(TeamRequiredMixin, View):
+    """Try a failed email again from scratch."""
+
+    def post(self, request, pk):
+        email = get_object_or_404(OutboxEmail, pk=pk)
+        if email.status != OutboxEmail.Status.FAILED:
+            messages.error(request, "Only failed emails can be retried.")
+        else:
+            retry(email)
+            messages.success(request, f"Email to {email.to_email} queued again. It goes out within a minute or two.")
+        next_url = request.POST.get("next") or ""
+        if not url_has_allowed_host_and_scheme(next_url, {request.get_host()}, request.is_secure()):
+            next_url = reverse("console:emails")
+        return redirect(next_url)
 
 
 class TeamListView(TeamRequiredMixin, ListView):

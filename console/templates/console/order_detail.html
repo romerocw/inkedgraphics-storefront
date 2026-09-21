@@ -69,6 +69,25 @@
       </dl>
     </div>
 
+    <div class="card mt-6">
+      <h2 class="mb-3 text-lg font-semibold">Confirmation email</h2>
+      {% for email in confirmations %}
+      <p class="mb-2 text-sm">
+        {% include "console/_outbox_status.html" %}
+        <span class="muted">{% if email.sent_at %}sent {{ email.sent_at|date:"M j, Y g:i a" }}{% else %}queued {{ email.created_at|date:"M j, Y g:i a" }}{% endif %}</span>
+        {% if email.last_error %}<br><span class="text-xs text-red-800 break-all">{{ email.last_error }}</span>{% endif %}
+      </p>
+      {% empty %}
+      <p class="muted mb-2 text-sm">None sent for this order.</p>
+      {% endfor %}
+      {% if can_resend_confirmation %}
+      <form method="post" action="{% url 'console:order_resend_confirmation' order.order_number %}" class="mt-3">{% csrf_token %}
+        <button type="submit" class="btn btn-secondary w-full">Resend confirmation</button>
+      </form>
+      <p class="muted mt-2 text-xs">Emails {{ order.buyer_email }} again, with the order as it is now.</p>
+      {% endif %}
+    </div>
+
     {% if moves or can_cancel %}
     <div class="card mt-6">
       <h2 class="mb-1 text-lg font-semibold">Next step</h2>
