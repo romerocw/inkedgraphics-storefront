@@ -1,7 +1,9 @@
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import models
 from django.templatetags.tz import do_timezone
+from django.utils import timezone
 
 # Where a store's open/close times are meant. Times are typed and shown in the store's zone,
 # whoever is looking; everything else on the site uses settings.TIME_ZONE (Eastern).
@@ -94,3 +96,34 @@ class Store(models.Model):
     @property
     def closes_local(self):
         return do_timezone(self.closes_at, self.zone) if self.closes_at else None
+
+
+class StoreStatusChange(models.Model):
+    """One entry in a store's status history: who (or the schedule) changed what, when."""
+
+    class Reason(models.TextChoices):
+        SCHEDULED = "scheduled", "On schedule"
+        MANUAL = "manual", "Changed by staff"
+
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name="status_changes")
+    from_status = models.CharField(
+        max_length=20, choices=Store.Status.choices, blank=True,
+        help_text="Status before the change. Blank when the store was just created.",
+    )
+    to_status = models.CharField(max_length=20, choices=Store.Status.choices)
+    changed_at = models.DateTimeField(default=timezone.now, db_index=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="store_status_changes",
+        help_text="Staff member who made the change. Blank if the schedule did it.",
+    )
+    reason = models.CharField(
+        max_length=20, choices=Reason.choices,
+        help_text="Scheduled: opened/closed by lifecycle_tick. Manual: set in the store form.",
+    )
+
+    class Meta:
+        ordering = ["changed_at", "pk"]
+
+    def __str__(self):
+        return f"{self.store}: {self.from_status or 'new'} -> {self.to_status} ({self.reason})"

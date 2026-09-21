@@ -7,11 +7,12 @@ from zoneinfo import ZoneInfo
 from django.apps import apps
 from django.template import Context, Template
 from django.test import TestCase
+from django.urls import reverse
 
 from console.forms import StoreForm
-from stores.factories import make_client, make_store
+from stores.factories import make_client, make_staff, make_store
 
-from .models import Store
+from .models import Store, StoreStatusChange
 
 UTC = timezone.utc
 PACIFIC = ZoneInfo("America/Los_Angeles")
@@ -131,3 +132,37 @@ class RezoneMigrationTests(TestCase):
             rezone_migration.eastern_to_utc(apps, None)
         store.refresh_from_db()
         self.assertEqual(store.opens_at, datetime(2026, 10, 1, 9, 0, tzinfo=UTC))
+
+
+class ManualStatusLogTests(TestCase):
+    """Status changes made in the console store form are logged with who made them."""
+
+    def setUp(self):
+        self.user = make_staff()
+        self.client.force_login(self.user)
+        self.shop_client = make_client()
+
+    def post(self, url, **overrides):
+        data = {
+            "client": self.shop_client.pk, "name": "Fall Store", "status": "draft", "time_zone": "America/New_York",
+            "opens_at": "", "closes_at": "", "primary_color": "", "subdomain": "", **overrides,
+        }
+        return self.client.post(url, data)
+
+    def test_creating_a_store_logs_its_first_status(self):
+        self.post(reverse("console:store_new"), status="scheduled")
+        (change,) = StoreStatusChange.objects.all()
+        self.assertEqual((change.from_status, change.to_status), ("", "scheduled"))
+        self.assertEqual((change.reason, change.changed_by), (StoreStatusChange.Reason.MANUAL, self.user))
+
+    def test_changing_status_logs_from_and_to(self):
+        store = make_store(client=self.shop_client, status=Store.Status.CLOSED)
+        response = self.post(reverse("console:store_edit", args=[store.pk]), status="open")
+        self.assertEqual(response.status_code, 302)
+        (change,) = store.status_changes.all()
+        self.assertEqual((change.from_status, change.to_status, change.changed_by), ("closed", "open", self.user))
+
+    def test_saving_without_changing_status_logs_nothing(self):
+        store = make_store(client=self.shop_client, status=Store.Status.OPEN)
+        self.post(reverse("console:store_edit", args=[store.pk]), status="open", name="Renamed")
+        self.assertFalse(store.status_changes.exists())

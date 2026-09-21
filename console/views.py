@@ -33,6 +33,7 @@ from messaging.models import OutboxEmail
 from messaging.outbox import emails_about, retry
 from orders.emails import ORDER_CONFIRMATION, queue_order_confirmation
 from orders.models import Order, allowed_transitions, change_status
+from stores.lifecycle import record_manual_change
 from stores.models import Client, Store
 
 from .invitations import InvitationInvalid, send_invitation, user_from_token
@@ -340,11 +341,25 @@ class StoreCreateView(StaffRequiredMixin, CreateView):
     success_url = reverse_lazy("console:stores")
     extra_context = {"title": "New store"}
 
+    @transaction.atomic
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        record_manual_change(self.object, "", self.request.user)
+        return response
+
 
 class StoreUpdateView(StaffRequiredMixin, UpdateView):
     model, form_class = Store, StoreForm
     template_name = "console/form.html"
     extra_context = {"title": "Edit store"}
+
+    @transaction.atomic
+    def form_valid(self, form):
+        # The form has already copied the new status onto the instance, so ask the database.
+        from_status = Store.objects.select_for_update().values_list("status", flat=True).get(pk=self.object.pk)
+        response = super().form_valid(form)
+        record_manual_change(self.object, from_status, self.request.user)
+        return response
 
     def get_success_url(self):
         return reverse("console:store_detail", args=[self.object.pk])
