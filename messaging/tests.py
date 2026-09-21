@@ -1,9 +1,18 @@
+import io
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.core import mail
+from django.core.management import call_command
+from django.db import connection
+from django.db.models import QuerySet
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from stores.factories import make_order, make_store
 
 from .models import OutboxEmail
-from .outbox import emails_about, enqueue
+from .outbox import BACKOFF, MAX_ATTEMPTS, claim, emails_about, enqueue, retry, send_due
 
 INVITE_CONTEXT = {"invitee_name": "Dana", "inviter_name": "Charlie", "url": "https://example.com/invite/abc/"}
 
@@ -42,3 +51,144 @@ class EnqueueTests(TestCase):
 
         self.assertEqual(OutboxEmail.objects.get(pk=email.pk).related, order)
         self.assertEqual(list(emails_about(order)), [email])
+
+
+def queue(n=1, **kwargs):
+    rows = []
+    for i in range(n):
+        fields = {"kind": "test", "to_email": f"buyer{i}@example.com", "subject": f"Email {i}", "text_body": "Hello", "html_body": "<p>Hello</p>"}
+        rows.append(OutboxEmail.objects.create(**{**fields, **kwargs}))
+    return rows
+
+
+def run_command(**options):
+    out = io.StringIO()
+    call_command("send_outbox", stdout=out, **options)
+    return out.getvalue().strip()
+
+
+class SendOutboxTests(TestCase):
+    def test_sends_queued_email_and_prints_a_summary(self):
+        (email,) = queue(to_name="Dana Ruiz", to_email="dana@example.com")
+
+        self.assertEqual(run_command(), "send_outbox: sent=1 failed=0 remaining=0")
+
+        email.refresh_from_db()
+        self.assertEqual(email.status, OutboxEmail.Status.SENT)
+        self.assertEqual(email.attempts, 1)
+        self.assertIsNotNone(email.sent_at)
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, ["Dana Ruiz <dana@example.com>"])
+        self.assertEqual(message.subject, "Email 0")
+        self.assertEqual(message.body, "Hello")
+        self.assertEqual(message.alternatives[0].content, "<p>Hello</p>")
+
+    def test_does_nothing_quietly_when_empty(self):
+        self.assertEqual(run_command(), "send_outbox: sent=0 failed=0 remaining=0")
+        self.assertEqual(mail.outbox, [])
+
+    def test_sends_at_most_the_limit_oldest_first(self):
+        rows = queue(52)
+        self.assertEqual(run_command(), "send_outbox: sent=50 failed=0 remaining=2")
+        self.assertEqual([m.subject for m in mail.outbox], [r.subject for r in rows[:50]])
+        self.assertEqual(run_command(limit=10), "send_outbox: sent=2 failed=0 remaining=0")
+
+    def test_never_resends_sent_email(self):
+        queue()
+        run_command()
+        self.assertEqual(run_command(), "send_outbox: sent=0 failed=0 remaining=0")
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_records_a_failure_and_waits_before_retrying(self):
+        (email,) = queue()
+        with patch("django.core.mail.EmailMessage.send", side_effect=ConnectionRefusedError("SMTP down")):
+            before = timezone.now()
+            self.assertEqual(run_command(), "send_outbox: sent=0 failed=1 remaining=0")
+
+        email.refresh_from_db()
+        self.assertEqual(email.status, OutboxEmail.Status.FAILED)
+        self.assertEqual(email.attempts, 1)
+        self.assertEqual(email.last_error, "ConnectionRefusedError: SMTP down")
+        self.assertGreaterEqual(email.next_attempt_at, before + BACKOFF[0])
+        self.assertIsNone(email.sent_at)
+
+        # Not due yet, so the next run leaves it alone.
+        self.assertEqual(run_command(), "send_outbox: sent=0 failed=0 remaining=0")
+        self.assertEqual(mail.outbox, [])
+
+        # Once the wait is over it goes, and the error is cleared.
+        with patch("django.utils.timezone.now", return_value=email.next_attempt_at + timedelta(seconds=1)):
+            self.assertEqual(run_command(), "send_outbox: sent=1 failed=0 remaining=0")
+        email.refresh_from_db()
+        self.assertEqual((email.status, email.attempts, email.last_error), (OutboxEmail.Status.SENT, 2, ""))
+
+    def test_backs_off_longer_each_time_then_gives_up_after_five(self):
+        (email,) = queue()
+        waits = []
+        with patch("django.core.mail.EmailMessage.send", side_effect=OSError("nope")):
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                now = timezone.now() + timedelta(days=attempt)  # always past any wait
+                with patch("django.utils.timezone.now", return_value=now):
+                    self.assertEqual(run_command(), "send_outbox: sent=0 failed=1 remaining=0")
+                email.refresh_from_db()
+                self.assertEqual(email.attempts, attempt)
+                if email.next_attempt_at:
+                    waits.append(email.next_attempt_at - now)
+
+            self.assertEqual(waits, BACKOFF)
+            self.assertIsNone(email.next_attempt_at)
+            self.assertTrue(email.gave_up)
+
+            # Given up: no more attempts, however long we wait.
+            with patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(days=30)):
+                self.assertEqual(run_command(), "send_outbox: sent=0 failed=0 remaining=0")
+        email.refresh_from_db()
+        self.assertEqual(email.attempts, MAX_ATTEMPTS)
+
+    def test_one_failure_does_not_stop_the_rest(self):
+        bad, good = queue(2)
+        real_send = mail.EmailMessage.send
+
+        def send(message, *args, **kwargs):
+            if message.subject == bad.subject:
+                raise OSError("bounced")
+            return real_send(message, *args, **kwargs)
+
+        with patch("django.core.mail.EmailMessage.send", send):
+            self.assertEqual(run_command(), "send_outbox: sent=1 failed=1 remaining=0")
+        self.assertEqual([m.subject for m in mail.outbox], [good.subject])
+
+    def test_each_row_is_locked_while_it_is_sent(self):
+        # SQLite can't lock rows, so check the query asks for the lock; MariaDB honours it.
+        queue(2)
+        real = QuerySet.select_for_update
+        with patch.object(QuerySet, "select_for_update", autospec=True, side_effect=real) as spy:
+            send_due()
+        self.assertEqual(spy.call_count, 2)
+        for call in spy.call_args_list:
+            self.assertEqual(call.kwargs, {"skip_locked": connection.features.has_select_for_update_skip_locked})
+
+    def test_skips_a_row_another_run_sent_first(self):
+        # Simulates two overlapping runs: this run has already listed both rows when the
+        # other run sends the second one. The lock + re-check must stop a second send.
+        first, second = queue(2)
+        real_send = mail.EmailMessage.send
+
+        def send(message, *args, **kwargs):
+            if message.subject == first.subject:
+                OutboxEmail.objects.filter(pk=second.pk).update(status=OutboxEmail.Status.SENT, sent_at=timezone.now())
+            return real_send(message, *args, **kwargs)
+
+        with patch("django.core.mail.EmailMessage.send", send):
+            self.assertEqual(send_due(), (1, 0, 0))
+        self.assertEqual([m.subject for m in mail.outbox], [first.subject])
+        second.refresh_from_db()
+        self.assertEqual(second.attempts, 0)
+
+    def test_retry_requeues_a_failed_email_with_fresh_attempts(self):
+        (email,) = queue(status=OutboxEmail.Status.FAILED, attempts=MAX_ATTEMPTS, last_error="nope")
+        retry(email)
+        self.assertEqual(run_command(), "send_outbox: sent=1 failed=0 remaining=0")
+        email.refresh_from_db()
+        self.assertEqual((email.status, email.attempts), (OutboxEmail.Status.SENT, 1))
