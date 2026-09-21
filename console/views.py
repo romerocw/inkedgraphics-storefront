@@ -1,7 +1,8 @@
 from datetime import timedelta
 
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.contrib.auth.views import LoginView, LogoutView
+from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView
+from django.contrib.messages.views import SuccessMessageMixin
 from django.db.models import Count, Q, Sum
 from django.urls import reverse_lazy
 from django.utils import timezone
@@ -10,7 +11,7 @@ from django.views.generic import CreateView, ListView, TemplateView, UpdateView
 from orders.models import Order
 from stores.models import Client, Store
 
-from .forms import ClientForm, StoreForm
+from .forms import ClientForm, ConsolePasswordChangeForm, StoreForm
 
 PAID = Q(orders__status__in=[Order.Status.PAID, Order.Status.SENT_TO_OPS, Order.Status.FULFILLED])
 
@@ -29,6 +30,13 @@ class ConsoleLoginView(LoginView):
 
 class ConsoleLogoutView(LogoutView):
     next_page = reverse_lazy("console:login")
+
+
+class ConsolePasswordChangeView(StaffRequiredMixin, SuccessMessageMixin, PasswordChangeView):
+    form_class = ConsolePasswordChangeForm
+    template_name = "console/password_change.html"
+    success_url = reverse_lazy("console:dashboard")
+    success_message = "Your password has been changed."
 
 
 class DashboardView(StaffRequiredMixin, TemplateView):

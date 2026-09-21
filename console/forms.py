@@ -1,4 +1,5 @@
 from django import forms
+from django.contrib.auth.forms import PasswordChangeForm
 from django.utils.text import slugify
 
 from stores.models import Client, Store
@@ -6,13 +7,15 @@ from stores.models import Client, Store
 INPUT = "mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand focus:outline-none"
 
 
-class StyledForm(forms.ModelForm):
+class StyledFieldsMixin:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             if not isinstance(field.widget, (forms.CheckboxInput, forms.FileInput)):
                 field.widget.attrs.setdefault("class", INPUT)
 
+
+class StyledForm(StyledFieldsMixin, forms.ModelForm):
     def _unique_slug(self, source):
         base = slugify(source) or "item"
         slug, n = base, 2
@@ -59,3 +62,7 @@ class StoreForm(StyledForm):
         if not self.instance.slug:
             self.instance.slug = self._unique_slug(self.cleaned_data["name"])
         return super().save(commit)
+
+
+class ConsolePasswordChangeForm(StyledFieldsMixin, PasswordChangeForm):
+    pass

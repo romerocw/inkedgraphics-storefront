@@ -165,9 +165,15 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 CSRF_TRUSTED_ORIGINS = ["https://store.inkedgraphics.com", "https://*.inkedgraphics.com"]
 
+# Hashed static names need a collectstatic manifest, which local dev and test runs don't
+# build; plain storage serves {% static %} straight from the app static dirs.
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"},
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        if DEBUG
+        else "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+    },
 }
 
 # Media (uploads) live in S3 under media/; bucket is private, URLs are signed.

@@ -21,7 +21,7 @@
       </div>
       {% if user.is_authenticated %}
       <form method="post" action="{% url 'console:logout' %}" class="text-sm">{% csrf_token %}
-        <span class="muted mr-3 text-gray-400">{{ user.get_username }}</span><button type="submit" class="hover:underline">Sign out</button>
+        <span class="muted mr-3 text-gray-400">{{ user.get_username }}</span><a href="{% url 'console:password_change' %}" class="mr-3 hover:underline">Change password</a><button type="submit" class="hover:underline">Sign out</button>
       </form>
       {% endif %}
     </div>
