@@ -12,7 +12,9 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   - stores: list -> store page (`?tab=summary|products|orders`), edit at `stores/<pk>/edit/`
   - orders: `orders/` (filters, 50/page), `orders/<order_number>/`, CSV at `stores/<pk>/orders.csv`
   - catalog: `products/`, `products/new/`, `products/<pk>/` (product + variants in one form)
-  - own password at `password/`
+  - accounts: `profile/` (own details), `password/`, `team/` + `team/<pk>/` (owner/manager only)
+  - public pages: `login/`, `forgot/` (4 reset steps), `invite/<token>/`
+  - `StaffProfile` (role, phone, job title, invited_by), `permissions.py`, `invitations.py`, `mail.py`
 - `assets/input.css` Tailwind v4 source -> built to `stores/static/stores/site.css`
 - `deploy/` `uwsgi.ini`, `deploy.sh`
 
@@ -33,7 +35,37 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   uses it too, so filters stay consistent. That CSV's column order is what staff hand-key from —
   don't reorder it, and keep the utf-8-sig BOM so Excel opens it cleanly.
 - Blank `ProductVariant.sku` is filled from `<sku_prefix>-<COLOR>-<SIZE>` by `console.forms.unique_sku()`.
-- Tests use the builders in `stores/factories.py`.
+- Tests use the builders in `stores/factories.py` (`make_owner`, `make_manager`, `make_staff`, …).
+
+## Staff accounts
+- Roles live on `StaffProfile`: **owner** (everything, including other owners), **manager**
+  (everything except owners' accounts and handing out the owner role), **staff** (clients,
+  stores, orders, products — no team access).
+- Every rule about who may change whom is in `console/permissions.py` and returns
+  `(allowed, reason)`; views show that reason verbatim. Don't re-check roles inline.
+  Templates get `can_manage_team` from `console.context_processors.console_flags`.
+- Accounts are deactivated (`User.is_active`), never deleted — orders and status history
+  point at them. Nobody deactivates themselves; the last active owner can't be demoted or
+  switched off. Status on the team list is derived: active / invited (no password yet) /
+  deactivated.
+- Invitations: the account is created switched off with an unusable password and a username
+  built from the email address; the emailed link is a `TimestampSigner` token that lasts 72
+  hours (`console/invitations.py`). Setting a password spends the invitation, so a link can't
+  be reused; re-sending mints a fresh one. Expired/used/tampered links get a friendly page.
+- Forgotten passwords use Django's own reset views with console templates, and never reveal
+  whether an address exists.
+
+## Email
+- `MAILERS` is built from the environment in `config/settings.py`: `EMAIL_URL`
+  (`smtp://user:pass@host:port/`, `smtps://` for SSL, `?tls=0` to disable STARTTLS) or
+  `EMAIL_HOST`/`EMAIL_PORT`/`EMAIL_HOST_USER`/`EMAIL_HOST_PASSWORD`/`EMAIL_USE_TLS`/`EMAIL_USE_SSL`.
+  With none set, dev prints to the console and production writes files to `../logs/emails/`
+  so nothing is lost before a provider exists. `DEFAULT_FROM_EMAIL` is the shop address.
+- Django 6.1 deprecated `EMAIL_BACKEND`/`get_connection()` in favour of `MAILERS`; configure
+  mailers, not `EMAIL_BACKEND`.
+- Send console email through `console.mail.send_console_email()`, which renders a
+  `console/email/<name>.txt` + `.html` pair off one branded base — reuse it for order
+  confirmations.
 
 ## Commands
 - Run locally: `source ../venv/bin/activate && python manage.py runserver`
@@ -42,5 +74,5 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
 - Deploy (on server, as root): `/srv/storefront/app/deploy/deploy.sh`
 
 ## Not yet built
-Email (confirmations, magic links), store lifecycle cron, 2FA, buyer accounts,
+Order confirmation emails, store lifecycle cron, 2FA, buyer accounts,
 order hand-off API to the ops system (separate business — never share DB/S3).
