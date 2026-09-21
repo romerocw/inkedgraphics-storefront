@@ -517,3 +517,70 @@ class ProductCatalogTests(TestCase):
         make_product(name="Hoodie", sku_prefix="HOOD", variants=[("Black", "M"), ("Black", "L")])
         response = self.client.get(reverse("console:products"))
         self.assertEqual(response.context["object_list"][0].variant_count, 2)
+
+
+class ConsoleAccessTests(TestCase):
+    """Nobody without is_staff gets into the console, on any page."""
+
+    # Pages anyone may reach: signing in, and signing out again.
+    PUBLIC = {"login", "logout"}
+
+    def setUp(self):
+        self.store = make_store()
+        self.order = make_order(self.store)
+        self.product = make_product()
+        self.shop_client = self.store.client
+
+    def staff_urls(self):
+        return {
+            "dashboard": [],
+            "password_change": [],
+            "clients": [],
+            "client_new": [],
+            "client_edit": [self.shop_client.pk],
+            "stores": [],
+            "store_new": [],
+            "store_detail": [self.store.pk],
+            "store_edit": [self.store.pk],
+            "store_products": [self.store.pk],
+            "store_products_add": [self.store.pk],
+            "store_orders_csv": [self.store.pk],
+            "orders": [],
+            "orders_bulk": [],
+            "order_detail": [self.order.order_number],
+            "order_status": [self.order.order_number],
+            "products": [],
+            "product_new": [],
+            "product_edit": [self.product.pk],
+        }
+
+    def test_every_console_page_is_in_this_test(self):
+        from console import urls
+
+        names = {pattern.name for pattern in urls.urlpatterns}
+        self.assertEqual(names - self.PUBLIC, set(self.staff_urls()), "A new console page needs an access test here.")
+
+    def test_a_signed_in_non_staff_user_is_refused(self):
+        get_user_model().objects.create_user("buyer", password="buyer-pass-3391")
+        self.client.login(username="buyer", password="buyer-pass-3391")
+        for name, args in self.staff_urls().items():
+            url = reverse(f"console:{name}", args=args)
+            with self.subTest(page=name):
+                self.assertEqual(self.client.get(url).status_code, 403)
+                self.assertEqual(self.client.post(url).status_code, 403)
+
+    def test_anonymous_visitors_are_sent_to_sign_in(self):
+        for name, args in self.staff_urls().items():
+            url = reverse(f"console:{name}", args=args)
+            with self.subTest(page=name):
+                response = self.client.get(url)
+                self.assertRedirects(response, f"{reverse('console:login')}?next={url}")
+
+    def test_staff_can_reach_every_page_that_answers_a_get(self):
+        self.client.force_login(make_staff())
+        post_only = {"store_products", "store_products_add", "orders_bulk", "order_status"}
+        for name, args in self.staff_urls().items():
+            if name in post_only:
+                continue
+            with self.subTest(page=name):
+                self.assertEqual(self.client.get(reverse(f"console:{name}", args=args)).status_code, 200)
