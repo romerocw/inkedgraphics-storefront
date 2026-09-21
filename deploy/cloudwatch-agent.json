@@ -1,0 +1,38 @@
+{
+  "agent": {
+    "run_as_user": "root",
+    "logfile": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log"
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/srv/storefront/logs/uwsgi.log",
+            "log_group_name": "/storefront/prod",
+            "log_stream_name": "{instance_id}/uwsgi.log",
+            "retention_in_days": 30
+          },
+          {
+            "file_path": "/srv/storefront/logs/httpd-error.log",
+            "log_group_name": "/storefront/prod",
+            "log_stream_name": "{instance_id}/httpd-error.log",
+            "retention_in_days": 30
+          },
+          {
+            "file_path": "/srv/storefront/logs/cron-send_outbox.log",
+            "log_group_name": "/storefront/prod",
+            "log_stream_name": "{instance_id}/cron-send_outbox.log",
+            "retention_in_days": 30
+          },
+          {
+            "file_path": "/srv/storefront/logs/cron-lifecycle_tick.log",
+            "log_group_name": "/storefront/prod",
+            "log_stream_name": "{instance_id}/cron-lifecycle_tick.log",
+            "retention_in_days": 30
+          }
+        ]
+      }
+    }
+  }
+}

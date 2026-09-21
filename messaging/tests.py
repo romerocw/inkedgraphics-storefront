@@ -211,11 +211,44 @@ class CronFileTests(TestCase):
         # cron silently drops a final line that has no newline.
         self.assertTrue(self.text.endswith("\n"))
 
-    def test_runs_send_outbox_every_minute_as_storefront_under_flock(self):
-        jobs = [line for line in self.text.splitlines() if line and not line.startswith("#") and "=" not in line.split()[0]]
-        self.assertEqual(len(jobs), 1)
-        fields = jobs[0].split()
-        self.assertEqual(fields[:6], ["*", "*", "*", "*", "*", "storefront"])
-        self.assertEqual(fields[6:8], ["flock", "-n"])
-        self.assertIn("/srv/storefront/venv/bin/python /srv/storefront/app/manage.py send_outbox", jobs[0])
-        self.assertTrue(jobs[0].endswith(">> /srv/storefront/logs/cron-send_outbox.log 2>&1"))
+    def jobs(self):
+        return [line for line in self.text.splitlines() if line and not line.startswith("#") and "=" not in line.split()[0]]
+
+    def assertJob(self, command, schedule):
+        (job,) = [j for j in self.jobs() if f"manage.py {command} " in j]
+        fields = job.split()
+        self.assertEqual(fields[:6], [*schedule.split(), "storefront"])
+        self.assertEqual(fields[6:9], ["flock", "-n", f"/srv/storefront/run/{command}.lock"])
+        self.assertIn(f"/srv/storefront/venv/bin/python /srv/storefront/app/manage.py {command} >>", job)
+        self.assertTrue(job.endswith(f">> /srv/storefront/logs/cron-{command}.log 2>&1"))
+
+    def test_runs_send_outbox_every_minute(self):
+        self.assertJob("send_outbox", "* * * * *")
+
+    def test_runs_lifecycle_tick_every_five_minutes(self):
+        self.assertJob("lifecycle_tick", "*/5 * * * *")
+
+    def test_has_no_other_jobs(self):
+        self.assertEqual(len(self.jobs()), 2)
+
+    def test_logrotate_covers_every_cron_log(self):
+        from django.conf import settings
+
+        rotate = (settings.BASE_DIR / "deploy" / "logrotate.d" / "storefront").read_text()
+        self.assertIn("/srv/storefront/logs/cron-*.log {", rotate)
+
+
+class CloudWatchConfigTests(TestCase):
+    def test_ships_the_app_web_and_cron_logs_to_one_group_for_30_days(self):
+        import json
+
+        from django.conf import settings
+
+        config = json.loads((settings.BASE_DIR / "deploy" / "cloudwatch-agent.json").read_text())
+        files = config["logs"]["logs_collected"]["files"]["collect_list"]
+        self.assertEqual(
+            [f["file_path"].removeprefix("/srv/storefront/logs/") for f in files],
+            ["uwsgi.log", "httpd-error.log", "cron-send_outbox.log", "cron-lifecycle_tick.log"],
+        )
+        self.assertEqual({f["log_group_name"] for f in files}, {"/storefront/prod"})
+        self.assertEqual({f["retention_in_days"] for f in files}, {30})

@@ -20,4 +20,21 @@ echo "== logrotate";   install -m 644 -o root -g root "$APP/deploy/logrotate.d/s
 echo "== restart";     systemctl restart storefront-uwsgi
 sleep 2
 echo "== health";      curl -sf http://127.0.0.1/health/ && echo
+
+# Ship logs to CloudWatch (deploy/MONITORING.md). Last, so a monitoring problem never blocks
+# the app itself. Re-applied only when the config changed; a failed apply removes the
+# installed copy so the next deploy tries again.
+CWA=/opt/aws/amazon-cloudwatch-agent
+CWA_CONF=$CWA/etc/storefront-cloudwatch-agent.json
+echo "== cloudwatch"
+if [ ! -x "$CWA/bin/amazon-cloudwatch-agent-ctl" ]; then
+  echo "WARNING: CloudWatch agent not installed; logs are NOT being shipped. See deploy/MONITORING.md."
+elif cmp -s "$APP/deploy/cloudwatch-agent.json" "$CWA_CONF"; then
+  echo "unchanged"
+else
+  install -m 644 -o root -g root "$APP/deploy/cloudwatch-agent.json" "$CWA_CONF"
+  "$CWA/bin/amazon-cloudwatch-agent-ctl" -a fetch-config -m ec2 -s -c "file:$CWA_CONF" \
+    || { rm -f "$CWA_CONF"; echo "ERROR: CloudWatch agent rejected the config; the app is deployed, logs are not shipping."; exit 1; }
+fi
+
 echo "== deployed $(run git -C "$APP" rev-parse --short HEAD)"
