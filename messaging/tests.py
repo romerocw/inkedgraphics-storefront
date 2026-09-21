@@ -192,3 +192,25 @@ class SendOutboxTests(TestCase):
         self.assertEqual(run_command(), "send_outbox: sent=1 failed=0 remaining=0")
         email.refresh_from_db()
         self.assertEqual((email.status, email.attempts), (OutboxEmail.Status.SENT, 1))
+
+
+class CronFileTests(TestCase):
+    """deploy/cron.d/storefront is installed as-is by deploy.sh; cron is unforgiving about it."""
+
+    def setUp(self):
+        from django.conf import settings
+
+        self.text = (settings.BASE_DIR / "deploy" / "cron.d" / "storefront").read_text()
+
+    def test_ends_with_a_newline(self):
+        # cron silently drops a final line that has no newline.
+        self.assertTrue(self.text.endswith("\n"))
+
+    def test_runs_send_outbox_every_minute_as_storefront_under_flock(self):
+        jobs = [line for line in self.text.splitlines() if line and not line.startswith("#") and "=" not in line.split()[0]]
+        self.assertEqual(len(jobs), 1)
+        fields = jobs[0].split()
+        self.assertEqual(fields[:6], ["*", "*", "*", "*", "*", "storefront"])
+        self.assertEqual(fields[6:8], ["flock", "-n"])
+        self.assertIn("/srv/storefront/venv/bin/python /srv/storefront/app/manage.py send_outbox", jobs[0])
+        self.assertTrue(jobs[0].endswith(">> /srv/storefront/logs/cron-send_outbox.log 2>&1"))

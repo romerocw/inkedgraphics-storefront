@@ -1,0 +1,12 @@
+# Rotates the storefront cron job logs. Versioned in deploy/logrotate.d/; deploy.sh installs
+# this file to /etc/logrotate.d/storefront. Cron reopens the log every run, so no copytruncate.
+/srv/storefront/logs/cron-*.log {
+    su storefront storefront
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 storefront storefront
+}

@@ -1,0 +1,8 @@
+# Storefront scheduled jobs. Versioned in deploy/cron.d/; deploy.sh installs this file to
+# /etc/cron.d/storefront (root-owned, mode 644, or cron ignores it). Edit here, not on the server.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# Send queued email (order confirmations etc.). flock -n skips a run if the last one is still going.
+* * * * * storefront flock -n /srv/storefront/run/send_outbox.lock /srv/storefront/venv/bin/python /srv/storefront/app/manage.py send_outbox >> /srv/storefront/logs/cron-send_outbox.log 2>&1
