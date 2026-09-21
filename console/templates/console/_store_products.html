@@ -1,0 +1,57 @@
+<h2 class="mb-2 text-lg font-semibold">What this store sells</h2>
+{% if formset.forms %}
+<form method="post" action="{% url 'console:store_products' store.pk %}">{% csrf_token %}
+  {{ formset.management_form }}
+  <table class="cart">
+    <tr><th>Name shown to buyers</th><th>Catalog product</th><th>Price</th><th>For sale</th><th>Order on page</th></tr>
+    {% for f in formset %}
+    <tr>
+      <td>
+        {{ f.id }}{{ f.display_name }}
+        <p class="muted mt-1 text-xs">Leave blank to use "{{ f.instance.product.name }}".</p>
+        {% for e in f.display_name.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
+      </td>
+      <td>{{ f.instance.product.name }}<br><span class="muted text-xs">{{ f.instance.product.sku_prefix }}</span></td>
+      <td>{{ f.price }}{% for e in f.price.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}</td>
+      <td>{{ f.is_active }}</td>
+      <td>{{ f.sort_order }}{% for e in f.sort_order.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <button type="submit" class="btn mt-3">Save changes</button>
+</form>
+{% else %}
+<p class="muted mb-4">This store has nothing for sale yet. Pick products below to add them.</p>
+{% endif %}
+
+<h2 class="mt-8 mb-2 text-lg font-semibold">Add products to this store</h2>
+{% if add_form.products %}
+<form method="post" action="{% url 'console:store_products_add' store.pk %}">{% csrf_token %}
+  {% if add_form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ add_form.non_field_errors }}</div>{% endif %}
+  <table class="cart">
+    <tr>
+      <th class="w-10"><input type="checkbox" id="check-all" aria-label="Select every product"></th>
+      <th>Product</th><th>Usual price</th><th>Price in this store <span class="muted font-normal">(blank = usual)</span></th>
+    </tr>
+    {% for row in add_form.rows %}
+    <tr>
+      <td>{{ row.add }}</td>
+      <td>{{ row.product.name }}<br><span class="muted text-xs">{{ row.product.sku_prefix }} · {{ row.product.variants.count }} size/color options</span></td>
+      <td class="muted">${{ row.product.default_price|floatformat:2 }}</td>
+      <td>{{ row.price }}{% for e in row.price.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="mt-3 flex items-center gap-3">
+    <button type="submit" name="add_selected" class="btn">Add selected</button>
+    <button type="submit" name="add_all" class="btn btn-secondary">Add all</button>
+  </div>
+</form>
+<script>
+  document.getElementById("check-all").addEventListener("change", function () {
+    document.querySelectorAll('input[type=checkbox][name^="add_"]').forEach(function (box) { box.checked = this.checked; }, this);
+  });
+</script>
+{% else %}
+<p class="muted">Every active product in the catalog is already in this store.</p>
+{% endif %}

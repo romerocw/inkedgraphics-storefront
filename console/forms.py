@@ -2,6 +2,7 @@ from django import forms
 from django.contrib.auth.forms import PasswordChangeForm
 from django.utils.text import slugify
 
+from catalog.models import StoreProduct
 from stores.models import Client, Store
 
 INPUT = "mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand focus:outline-none"
@@ -66,3 +67,43 @@ class StoreForm(StyledForm):
 
 class ConsolePasswordChangeForm(StyledFieldsMixin, PasswordChangeForm):
     pass
+
+
+class ConsoleStoreProductForm(StyledForm):
+    """Inline row for editing what a store sells and for how much."""
+
+    class Meta:
+        model = StoreProduct
+        fields = ["display_name", "price", "is_active", "sort_order"]
+        labels = {"display_name": "Name shown to buyers", "is_active": "For sale", "sort_order": "Order on page"}
+
+
+StoreProductFormSet = forms.modelformset_factory(StoreProduct, form=ConsoleStoreProductForm, extra=0)
+
+
+class AddStoreProductsForm(StyledFieldsMixin, forms.Form):
+    """Checkbox + price per catalog product a store doesn't offer yet."""
+
+    def __init__(self, *args, products=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.products = list(products)
+        for product in self.products:
+            self.fields[f"add_{product.pk}"] = forms.BooleanField(required=False, label=product.name)
+            self.fields[f"price_{product.pk}"] = forms.DecimalField(
+                max_digits=8, decimal_places=2, min_value=0, required=False,
+                initial=product.default_price, label=f"Price for {product.name}",
+            )
+        for field in self.fields.values():
+            if isinstance(field, forms.DecimalField):
+                field.widget.attrs["class"] = INPUT
+
+    def rows(self):
+        for product in self.products:
+            yield {"product": product, "add": self[f"add_{product.pk}"], "price": self[f"price_{product.pk}"]}
+
+    def chosen(self, everything=False):
+        """(product, price) pairs staff asked for. A blank price means the product's usual price."""
+        for product in self.products:
+            if everything or self.cleaned_data.get(f"add_{product.pk}"):
+                price = self.cleaned_data.get(f"price_{product.pk}")
+                yield product, product.default_price if price is None else price

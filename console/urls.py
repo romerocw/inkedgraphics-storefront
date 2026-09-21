@@ -14,5 +14,8 @@ urlpatterns = [
     path("clients/<int:pk>/", views.ClientUpdateView.as_view(), name="client_edit"),
     path("stores/", views.StoreListView.as_view(), name="stores"),
     path("stores/new/", views.StoreCreateView.as_view(), name="store_new"),
-    path("stores/<int:pk>/", views.StoreUpdateView.as_view(), name="store_edit"),
+    path("stores/<int:pk>/", views.StoreDetailView.as_view(), name="store_detail"),
+    path("stores/<int:pk>/edit/", views.StoreUpdateView.as_view(), name="store_edit"),
+    path("stores/<int:pk>/products/", views.StoreProductsView.as_view(), name="store_products"),
+    path("stores/<int:pk>/products/add/", views.StoreProductsAddView.as_view(), name="store_products_add"),
 ]
