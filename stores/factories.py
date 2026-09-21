@@ -14,8 +14,30 @@ from stores.models import Client, Store
 counter = itertools.count(1)
 
 
-def make_staff(username="staffer", password="test-pass-1827"):
-    return get_user_model().objects.create_user(username, password=password, is_staff=True)
+def make_staff(username=None, password="test-pass-1827", role=None, **kwargs):
+    """A staff user with a profile. role defaults to the profile default (staff)."""
+    from console.models import StaffProfile, profile_for
+
+    n = next(counter)
+    kwargs.setdefault("email", f"staff{n}@inkedgraphics.com")
+    user = get_user_model().objects.create_user(username or f"staffer{n}", password=password, is_staff=True, **kwargs)
+    profile = profile_for(user)
+    if role and profile.role != role:
+        StaffProfile.objects.filter(pk=profile.pk).update(role=role)
+        profile.refresh_from_db()
+    return user
+
+
+def make_owner(**kwargs):
+    from console.models import StaffProfile
+
+    return make_staff(role=StaffProfile.Role.OWNER, **kwargs)
+
+
+def make_manager(**kwargs):
+    from console.models import StaffProfile
+
+    return make_staff(role=StaffProfile.Role.MANAGER, **kwargs)
 
 
 def make_client(name=None, **kwargs):
