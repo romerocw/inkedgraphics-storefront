@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "catalog",
     "orders",
     "console",
+    "messaging",
 ]
 
 MIDDLEWARE = [
@@ -195,6 +196,9 @@ else:
 
 # Email. Real SMTP once the server has credentials; until then nothing is silently dropped —
 # dev prints to the console, production writes files under ../logs/emails/.
+# Base URL for links in email sent outside a web request (the outbox runs from cron).
+SITE_URL = os.environ.get("SITE_URL", "http://localhost:8000" if DEBUG else "https://store.inkedgraphics.com").rstrip("/")
+
 DEFAULT_FROM_EMAIL = "Inked Graphics Stores <orders@inkedgraphics.com>"
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
@@ -226,6 +230,7 @@ else:
     _smtp = None
 
 if _smtp:
+    _smtp["timeout"] = 30  # seconds; a hung server must not stall the send_outbox cron run forever
     MAILERS = {"default": {"BACKEND": "django.core.mail.backends.smtp.EmailBackend", "OPTIONS": _smtp}}
 elif DEBUG:
     MAILERS = {"default": {"BACKEND": "django.core.mail.backends.console.EmailBackend"}}

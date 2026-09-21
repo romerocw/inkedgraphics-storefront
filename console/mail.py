@@ -10,10 +10,16 @@ def site_url(request):
     return f"{'https' if request.is_secure() else 'http'}://{request.get_host()}"
 
 
+def render_email(template_name, context):
+    """Render <template_name>.txt and .html; returns (text, html)."""
+    text = render_to_string(f"{template_name}.txt", context).strip() + "\n"
+    html = render_to_string(f"{template_name}.html", context)
+    return text, html
+
+
 def send_console_email(subject, template, context, to):
     """Render console/email/<template>.txt and .html and send them to one address."""
-    text = render_to_string(f"console/email/{template}.txt", context).strip() + "\n"
-    html = render_to_string(f"console/email/{template}.html", context)
+    text, html = render_email(f"console/email/{template}", context)
     message = EmailMultiAlternatives(subject, text, settings.DEFAULT_FROM_EMAIL, [to])
     message.attach_alternative(html, "text/html")
     message.send()
