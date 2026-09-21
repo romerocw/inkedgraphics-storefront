@@ -522,8 +522,12 @@ class ProductCatalogTests(TestCase):
 class ConsoleAccessTests(TestCase):
     """Nobody without is_staff gets into the console, on any page."""
 
-    # Pages anyone may reach: signing in, and signing out again.
-    PUBLIC = {"login", "logout"}
+    # Pages anyone may reach: signing in, signing out, and the forgotten-password steps
+    # (someone locked out can't be asked to sign in first).
+    PUBLIC = {
+        "login", "logout",
+        "password_reset", "password_reset_sent", "password_reset_confirm", "password_reset_done",
+    }
 
     def setUp(self):
         self.store = make_store()

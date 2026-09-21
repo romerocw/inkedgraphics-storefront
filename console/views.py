@@ -4,7 +4,15 @@ from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView
+from django.contrib.auth.views import (
+    LoginView,
+    LogoutView,
+    PasswordChangeView,
+    PasswordResetCompleteView,
+    PasswordResetConfirmView,
+    PasswordResetDoneView,
+    PasswordResetView,
+)
 from django.contrib.messages.views import SuccessMessageMixin
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
@@ -22,10 +30,14 @@ from catalog.models import Product, StoreProduct
 from orders.models import Order, allowed_transitions, change_status
 from stores.models import Client, Store
 
+from .mail import site_url
 from .forms import (
     AddStoreProductsForm,
     ClientForm,
+    ConsoleAuthenticationForm,
     ConsolePasswordChangeForm,
+    ConsolePasswordResetForm,
+    ConsoleSetPasswordForm,
     OrderFilterForm,
     OrderStatusForm,
     ProductFilterForm,
@@ -99,11 +111,53 @@ class StaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
 
 class ConsoleLoginView(LoginView):
     template_name = "console/login.html"
+    authentication_form = ConsoleAuthenticationForm
     redirect_authenticated_user = True
 
 
 class ConsoleLogoutView(LogoutView):
     next_page = reverse_lazy("console:login")
+
+    def post(self, request, *args, **kwargs):
+        # Signing out clears the session, so the message is added to the fresh one.
+        response = super().post(request, *args, **kwargs)
+        messages.success(request, "You've been signed out.")
+        return response
+
+
+class ConsolePasswordResetView(PasswordResetView):
+    """Step 1 of forgotten-password: ask for an email address."""
+
+    template_name = "console/password_reset.html"
+    form_class = ConsolePasswordResetForm
+    subject_template_name = "console/email/password_reset_subject.txt"
+    email_template_name = "console/email/password_reset.txt"
+    html_email_template_name = "console/email/password_reset.html"
+    success_url = reverse_lazy("console:password_reset_sent")
+
+    @property
+    def extra_email_context(self):
+        return {"site_url": site_url(self.request)}
+
+
+class ConsolePasswordResetSentView(PasswordResetDoneView):
+    """Step 2: told to check their email, whether or not the address existed."""
+
+    template_name = "console/password_reset_sent.html"
+
+
+class ConsolePasswordResetConfirmView(PasswordResetConfirmView):
+    """Step 3: set a new password from the emailed link."""
+
+    template_name = "console/password_reset_confirm.html"
+    form_class = ConsoleSetPasswordForm
+    success_url = reverse_lazy("console:password_reset_done")
+
+
+class ConsolePasswordResetDoneView(PasswordResetCompleteView):
+    """Step 4: done, go and sign in."""
+
+    template_name = "console/password_reset_done.html"
 
 
 class ConsolePasswordChangeView(StaffRequiredMixin, SuccessMessageMixin, PasswordChangeView):

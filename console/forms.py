@@ -1,5 +1,7 @@
 from django import forms
-from django.contrib.auth.forms import PasswordChangeForm
+from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, PasswordResetForm, SetPasswordForm
+from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 
 from catalog.models import Product, ProductVariant, StoreProduct
@@ -68,6 +70,36 @@ class StoreForm(StyledForm):
 
 class ConsolePasswordChangeForm(StyledFieldsMixin, PasswordChangeForm):
     pass
+
+
+class ConsoleSetPasswordForm(StyledFieldsMixin, SetPasswordForm):
+    pass
+
+
+class ConsolePasswordResetForm(StyledFieldsMixin, PasswordResetForm):
+    pass
+
+
+class ConsoleAuthenticationForm(StyledFieldsMixin, AuthenticationForm):
+    """Sign-in form that explains a deactivated account instead of just failing."""
+
+    deactivated = "This account has been deactivated. Ask an owner or manager to turn it back on."
+
+    def clean(self):
+        try:
+            return super().clean()
+        except ValidationError:
+            # Only say "deactivated" when the password was right, so the form can't be
+            # used to find out which addresses belong to staff.
+            username = self.cleaned_data.get("username")
+            password = self.cleaned_data.get("password")
+            if username and password:
+                user = get_user_model()._default_manager.filter(
+                    **{get_user_model().USERNAME_FIELD: username}
+                ).first()
+                if user and not user.is_active and user.check_password(password):
+                    raise ValidationError(self.deactivated, code="deactivated")
+            raise
 
 
 class ConsoleStoreProductForm(StyledForm):

@@ -1,6 +1,9 @@
+import re
+
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import TestCase
+from django.urls import reverse
 
 from console.mail import send_console_email
 from console.models import StaffProfile, profile_for
@@ -135,3 +138,105 @@ class StaffProfileTests(TestCase):
         user = make_staff(username="dana", first_name="Dana", last_name="Whitfield")
         self.assertEqual(user.staff_profile.display_name, "Dana Whitfield")
         self.assertEqual(make_staff(username="nameless").staff_profile.display_name, "nameless")
+
+
+class LoginPageTests(TestCase):
+    def setUp(self):
+        self.user = make_staff(username="dana", password="right-pass-5512")
+
+    def test_the_page_offers_a_way_out_of_a_forgotten_password(self):
+        response = self.client.get(reverse("console:login"))
+        self.assertContains(response, reverse("console:password_reset"))
+        self.assertContains(response, "Forgot your password?")
+
+    def test_a_wrong_password_says_nothing_about_the_account(self):
+        response = self.client.post(reverse("console:login"), {"username": "dana", "password": "wrong"})
+        self.assertContains(response, "Please enter a correct username and password")
+        self.assertNotContains(response, "deactivated")
+
+    def test_an_unknown_username_says_nothing_about_the_account(self):
+        response = self.client.post(reverse("console:login"), {"username": "nobody", "password": "whatever"})
+        self.assertContains(response, "Please enter a correct username and password")
+
+    def test_a_deactivated_user_with_the_right_password_is_told_why(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        response = self.client.post(reverse("console:login"), {"username": "dana", "password": "right-pass-5512"})
+        self.assertContains(response, "has been deactivated")
+
+    def test_a_deactivated_user_with_a_wrong_password_learns_nothing(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        response = self.client.post(reverse("console:login"), {"username": "dana", "password": "wrong"})
+        self.assertNotContains(response, "deactivated")
+
+    def test_signing_in_works_and_lands_on_the_dashboard(self):
+        response = self.client.post(
+            reverse("console:login"), {"username": "dana", "password": "right-pass-5512"}, follow=True
+        )
+        self.assertRedirects(response, reverse("console:dashboard"))
+
+    def test_signing_out_says_so_on_the_login_page(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("console:logout"), follow=True)
+        self.assertRedirects(response, reverse("console:login"))
+        self.assertContains(response, "You&#x27;ve been signed out")
+
+
+class PasswordResetFlowTests(TestCase):
+    def setUp(self):
+        self.user = make_staff(username="dana", password="old-pass-9271", email="dana@inkedgraphics.com")
+
+    def test_the_whole_flow_from_request_to_signing_in_again(self):
+        sent = self.client.post(reverse("console:password_reset"), {"email": "dana@inkedgraphics.com"})
+        self.assertRedirects(sent, reverse("console:password_reset_sent"))
+        self.assertContains(self.client.get(reverse("console:password_reset_sent")), "Check your email")
+
+        message = mail.outbox[0]
+        self.assertEqual(message.to, ["dana@inkedgraphics.com"])
+        self.assertEqual(message.subject, "Set a new password for your Inked Graphics account")
+        link = re.search(r"https?://[^\s]+/console/reset/[^\s]+", message.body).group(0)
+        html, _ = message.alternatives[0]
+        self.assertIn(link, html)  # both parts point at the same link
+
+        path = link.split("testserver", 1)[1]
+        follow = self.client.get(path, follow=True)  # Django swaps the token for a session-held one
+        self.assertContains(follow, "Set a new password")
+
+        done = self.client.post(
+            follow.redirect_chain[-1][0], {"new_password1": "brand-new-7741", "new_password2": "brand-new-7741"}
+        )
+        self.assertRedirects(done, reverse("console:password_reset_done"))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("brand-new-7741"))
+        self.assertTrue(self.client.login(username="dana", password="brand-new-7741"))
+
+    def test_an_unknown_address_looks_exactly_the_same_and_emails_nobody(self):
+        response = self.client.post(reverse("console:password_reset"), {"email": "stranger@example.com"})
+        self.assertRedirects(response, reverse("console:password_reset_sent"))
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_deactivated_account_gets_no_reset_email(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        self.client.post(reverse("console:password_reset"), {"email": "dana@inkedgraphics.com"})
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_used_link_stops_working(self):
+        self.client.post(reverse("console:password_reset"), {"email": "dana@inkedgraphics.com"})
+        link = re.search(r"https?://[^\s]+/console/reset/[^\s]+", mail.outbox[0].body).group(0)
+        path = link.split("testserver", 1)[1]
+        confirm = self.client.get(path, follow=True)
+        self.client.post(
+            confirm.redirect_chain[-1][0], {"new_password1": "brand-new-7741", "new_password2": "brand-new-7741"}
+        )
+
+        again = self.client.get(path)
+        self.assertFalse(again.context["validlink"])
+        self.assertContains(again, "That link has expired")
+        self.assertContains(again, reverse("console:password_reset"))
+
+    def test_a_made_up_link_is_refused_kindly(self):
+        response = self.client.get(reverse("console:password_reset_confirm", args=["MQ", "made-up-token"]))
+        self.assertFalse(response.context["validlink"])
+        self.assertContains(response, "That link has expired")

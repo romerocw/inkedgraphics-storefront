@@ -1,0 +1,11 @@
+{% extends "console/base.html" %}
+{% block header %}{% endblock %}
+{% block main_class %}mx-auto w-full max-w-md flex-1 px-4 py-10 sm:py-16{% endblock %}
+{% block content %}
+<div class="mb-6 text-center">
+  <div class="text-2xl font-bold tracking-tight text-gray-900">Inked Graphics</div>
+  <p class="muted mt-1 text-sm">{% block tagline %}Store console{% endblock %}</p>
+</div>
+<div class="card">{% block card %}{% endblock %}</div>
+{% block below_card %}{% endblock %}
+{% endblock %}
