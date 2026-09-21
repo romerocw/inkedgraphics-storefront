@@ -7,16 +7,20 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
 - `config/` settings, urls, health-check middleware (`/health/`)
 - `stores/` Client and Store models, public store pages, base templates
 - `catalog/` Product, ProductVariant (size/color, `upcharge`), StoreProduct (per-store price)
-- `orders/` Order/OrderItem (prices snapshotted), session Cart, checkout, Stripe (`payments.py`)
+- `orders/` Order/OrderItem (prices snapshotted), session Cart, checkout, Stripe (`payments.py`),
+  buyer emails (`emails.py`), signed order links (`links.py`)
+- `messaging/` the email outbox: `OutboxEmail`, `outbox.enqueue()`, `manage.py send_outbox`
 - `console/` staff UI at `/console/` (login required, `is_staff`)
   - stores: list -> store page (`?tab=summary|products|orders`), edit at `stores/<pk>/edit/`
-  - orders: `orders/` (filters, 50/page), `orders/<order_number>/`, CSV at `stores/<pk>/orders.csv`
+  - orders: `orders/` (filters, 50/page), `orders/<order_number>/` (with "Resend confirmation"
+    for paid orders), CSV at `stores/<pk>/orders.csv`
   - catalog: `products/`, `products/new/`, `products/<pk>/` (product + variants in one form)
   - accounts: `profile/` (own details), `password/`, `team/` + `team/<pk>/` (owner/manager only)
+  - `emails/`: outbox rows, status filter, retry failed (owner/manager only)
   - public pages: `login/`, `forgot/` (4 reset steps), `invite/<token>/`
   - `StaffProfile` (role, phone, job title, invited_by), `permissions.py`, `invitations.py`, `mail.py`
 - `assets/input.css` Tailwind v4 source -> built to `stores/static/stores/site.css`
-- `deploy/` `uwsgi.ini`, `deploy.sh`
+- `deploy/` `uwsgi.ini`, `deploy.sh`, `cron.d/storefront`, `logrotate.d/storefront`
 
 ## Conventions
 - Settings read `../.env` (one level above manage.py); never commit `.env`.
@@ -28,6 +32,8 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   which have no manifest): after template/CSS changes, rebuild Tailwind and run collectstatic
   (deploy.sh does both).
 - Write migrations by hand when renaming fields; keep help_text on model fields.
+- `orders.models.mark_paid()` is the only way into "paid": a conditional UPDATE, so of the success
+  page and the webhook only one wins, and only the winner queues the confirmation email.
 - Order status moves go through `orders.models.change_status()`: it enforces
   `ALLOWED_TRANSITIONS` (paid -> sent_to_ops/cancelled, sent_to_ops -> fulfilled/cancelled),
   requires a note to cancel, logs an `OrderStatusChange`, and never touches amounts.
@@ -68,16 +74,33 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   so nothing is lost before a provider exists. `DEFAULT_FROM_EMAIL` is the shop address.
 - Django 6.1 deprecated `EMAIL_BACKEND`/`get_connection()` in favour of `MAILERS`; configure
   mailers, not `EMAIL_BACKEND`.
-- Send console email through `console.mail.send_console_email()`, which renders a
-  `console/email/<name>.txt` + `.html` pair off one branded base — reuse it for order
-  confirmations.
+- Email templates are `.txt` + `.html` pairs extending `console/email/base.*` (rendered by
+  `console.mail.render_email()`). `brand_name`/`brand_color` in the context rebrand the header
+  and buttons; the text base turns autoescaping off. No logos: S3 media URLs expire in an hour.
+- **Outbox pattern — never send email inline in a web request.** Call
+  `messaging.outbox.enqueue(kind, to, subject, template_name, context, related=...)`, which
+  renders both bodies now and stores an `OutboxEmail` row. `manage.py send_outbox` (cron, every
+  minute) sends up to 50 due rows oldest first, each locked with `select_for_update` and
+  re-checked so overlapping runs can't double-send; failures back off 1m/5m/15m/1h and the 5th
+  is final. Delivery is at-least-once (a crash after SMTP accepts can resend). Staff watch and
+  retry at `/console/emails/`. The one exception is the invitation/password-reset mail,
+  still sent inline by `send_console_email()` since the person is waiting for it.
+- Links in email use `SITE_URL` (there's no request under cron). Links to a buyer's order use
+  `orders.links.order_url()`: the order page otherwise only opens in the browser that checked out.
 
 ## Commands
 - Run locally: `source ../venv/bin/activate && python manage.py runserver`
 - Tests: `python manage.py test` — add tests alongside new features; run the suite before committing
 - Rebuild CSS: `../bin/tailwindcss -i assets/input.css -o stores/static/stores/site.css --minify`
 - Deploy (on server, as root): `/srv/storefront/app/deploy/deploy.sh`
+- Send queued email now: `python manage.py send_outbox` (cron does this every minute)
+
+## Cron
+- Scheduled jobs live in `deploy/cron.d/storefront`; log rotation in `deploy/logrotate.d/storefront`.
+  `deploy.sh` installs both to `/etc/cron.d/` and `/etc/logrotate.d/` (root-owned, 644) on every
+  deploy, so edit them in the repo, never on the server. Jobs run as `storefront` via the venv,
+  wrapped in `flock -n`, logging to `/srv/storefront/logs/cron-<job>.log`.
 
 ## Not yet built
-Order confirmation emails, store lifecycle cron, 2FA, buyer accounts,
+Store lifecycle cron, 2FA, buyer accounts,
 order hand-off API to the ops system (separate business — never share DB/S3).
