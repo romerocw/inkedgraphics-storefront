@@ -123,16 +123,13 @@ STATIC_URL = 'static/'
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+# MAILERS is configured from the environment further down, with the other overrides.
 
 
 # --- storefront production overrides (reads /srv/storefront/.env) ---
 import os
+from urllib.parse import parse_qs, unquote, urlsplit
+
 from dotenv import load_dotenv
 
 load_dotenv(BASE_DIR.parent / ".env")
@@ -194,6 +191,50 @@ if os.environ.get("AWS_STORAGE_BUCKET_NAME"):
 else:
     MEDIA_URL = "/media/"
     MEDIA_ROOT = BASE_DIR / "media"
+
+# Email. Real SMTP once the server has credentials; until then nothing is silently dropped —
+# dev prints to the console, production writes files under ../logs/emails/.
+DEFAULT_FROM_EMAIL = "Inked Graphics Stores <orders@inkedgraphics.com>"
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+_email_url = os.environ.get("EMAIL_URL", "")
+if _email_url:
+    # e.g. smtp://user:pass@smtp.provider.com:587/ or smtps://... ("?tls=0" turns STARTTLS off)
+    _parts = urlsplit(_email_url)
+    _query = parse_qs(_parts.query)
+    _ssl = _parts.scheme in ("smtps", "smtp+ssl")
+    _smtp = {
+        "host": _parts.hostname or "",
+        "port": _parts.port or (465 if _ssl else 587),
+        "username": unquote(_parts.username or ""),
+        "password": unquote(_parts.password or ""),
+        "use_ssl": _ssl,
+        "use_tls": not _ssl and _query.get("tls", ["1"])[0] not in ("0", "false", "no"),
+    }
+elif os.environ.get("EMAIL_HOST"):
+    _ssl = os.environ.get("EMAIL_USE_SSL") == "1"
+    _smtp = {
+        "host": os.environ["EMAIL_HOST"],
+        "port": int(os.environ.get("EMAIL_PORT") or (465 if _ssl else 587)),
+        "username": os.environ.get("EMAIL_HOST_USER", ""),
+        "password": os.environ.get("EMAIL_HOST_PASSWORD", ""),
+        "use_ssl": _ssl,
+        "use_tls": not _ssl and os.environ.get("EMAIL_USE_TLS", "1") == "1",
+    }
+else:
+    _smtp = None
+
+if _smtp:
+    MAILERS = {"default": {"BACKEND": "django.core.mail.backends.smtp.EmailBackend", "OPTIONS": _smtp}}
+elif DEBUG:
+    MAILERS = {"default": {"BACKEND": "django.core.mail.backends.console.EmailBackend"}}
+else:
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.filebased.EmailBackend",
+            "OPTIONS": {"file_path": str(BASE_DIR.parent / "logs" / "emails")},
+        }
+    }
 
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")

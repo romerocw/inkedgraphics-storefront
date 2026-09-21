@@ -1,0 +1,11 @@
+{% extends "console/email/base.txt" %}{% block body %}Hi {{ invitee_name|default:"there" }},
+
+{{ inviter_name }} has set up an Inked Graphics account for you, so you can manage
+client stores, products and orders.
+
+Set your password to get started:
+
+{{ url }}
+
+This link works for the next 3 days. If it has expired by the time you get to it,
+ask {{ inviter_name }} to send you a new one.{% endblock %}
