@@ -138,7 +138,7 @@ from dotenv import load_dotenv
 load_dotenv(BASE_DIR.parent / ".env")
 
 SECRET_KEY = os.environ["SECRET_KEY"]
-DEBUG = False
+DEBUG = os.environ.get("DEBUG") == "1"
 ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h]
 
 DATABASES = {
@@ -152,6 +152,9 @@ DATABASES = {
         "OPTIONS": {"charset": "utf8mb4"},
     }
 }
+
+if os.environ.get("DB_ENGINE") == "sqlite":
+    DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
 
 STATIC_ROOT = BASE_DIR.parent / "static"
 STATIC_URL = "/static/"
@@ -168,23 +171,27 @@ STORAGES = {
 }
 
 # Media (uploads) live in S3 under media/; bucket is private, URLs are signed.
-STORAGES["default"] = {
-    "BACKEND": "storages.backends.s3.S3Storage",
-    "OPTIONS": {
-        "bucket_name": os.environ["AWS_STORAGE_BUCKET_NAME"],
-        "region_name": "us-east-2",
-        "endpoint_url": "https://s3.us-east-2.amazonaws.com",
-        "location": "media",
-        "default_acl": None,
-        "querystring_auth": True,
-        "querystring_expire": 3600,
-        "file_overwrite": False,
-    },
-}
+if os.environ.get("AWS_STORAGE_BUCKET_NAME"):
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "bucket_name": os.environ["AWS_STORAGE_BUCKET_NAME"],
+            "region_name": "us-east-2",
+            "endpoint_url": "https://s3.us-east-2.amazonaws.com",
+            "location": "media",
+            "default_acl": None,
+            "querystring_auth": True,
+            "querystring_expire": 3600,
+            "file_overwrite": False,
+        },
+    }
+else:
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = BASE_DIR / "media"
 
-STRIPE_PUBLISHABLE_KEY = os.environ["STRIPE_PUBLISHABLE_KEY"]
-STRIPE_SECRET_KEY = os.environ["STRIPE_SECRET_KEY"]
-STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
+STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 LOGIN_URL = "/console/login/"
 LOGIN_REDIRECT_URL = "/console/"

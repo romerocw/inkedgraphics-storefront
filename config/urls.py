@@ -23,3 +23,9 @@ urlpatterns = [
     path("", include("stores.urls")),
     path('django-admin/', admin.site.urls),
 ]
+
+from django.conf import settings
+from django.conf.urls.static import static
+
+if settings.DEBUG and getattr(settings, "MEDIA_ROOT", None):
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
