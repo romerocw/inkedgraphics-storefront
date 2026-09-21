@@ -240,3 +240,65 @@ class PasswordResetFlowTests(TestCase):
         response = self.client.get(reverse("console:password_reset_confirm", args=["MQ", "made-up-token"]))
         self.assertFalse(response.context["validlink"])
         self.assertContains(response, "That link has expired")
+
+
+class MyAccountTests(TestCase):
+    def setUp(self):
+        self.user = make_staff(username="dana", password="right-pass-5512", email="dana@inkedgraphics.com")
+        self.client.force_login(self.user)
+
+    def post(self, **overrides):
+        data = {
+            "first_name": "Dana", "last_name": "Whitfield",
+            "email": "dana@inkedgraphics.com", "phone": "703-555-0101", "current_password": "",
+        }
+        data.update(overrides)
+        return self.client.post(reverse("console:my_account"), data, follow=True)
+
+    def test_name_and_phone_save_without_a_password(self):
+        response = self.post()
+        self.user.refresh_from_db()
+        self.assertEqual((self.user.first_name, self.user.last_name), ("Dana", "Whitfield"))
+        self.assertEqual(profile_for(self.user).phone, "703-555-0101")
+        self.assertContains(response, "Your details have been saved")
+
+    def test_changing_the_email_needs_the_current_password(self):
+        response = self.post(email="new@inkedgraphics.com")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "dana@inkedgraphics.com")
+        self.assertContains(response, "enter your current password")
+
+    def test_changing_the_email_works_with_the_current_password(self):
+        self.post(email="new@inkedgraphics.com", current_password="right-pass-5512")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "new@inkedgraphics.com")
+
+    def test_a_wrong_current_password_is_refused(self):
+        self.post(email="new@inkedgraphics.com", current_password="not-my-password")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "dana@inkedgraphics.com")
+
+    def test_an_email_another_account_uses_is_refused(self):
+        make_staff(username="sam", email="sam@inkedgraphics.com")
+        response = self.post(email="sam@inkedgraphics.com", current_password="right-pass-5512")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "dana@inkedgraphics.com")
+        self.assertContains(response, "already uses that email")
+
+    def test_the_page_links_to_the_password_page_and_shows_the_role(self):
+        response = self.client.get(reverse("console:my_account"))
+        self.assertContains(response, reverse("console:password_change"))
+        self.assertContains(response, "Staff")
+
+    def test_staff_of_any_role_can_reach_their_own_account(self):
+        for user in (make_owner(), make_manager(), make_staff()):
+            with self.subTest(role=role_of(user)):
+                self.client.force_login(user)
+                self.assertEqual(self.client.get(reverse("console:my_account")).status_code, 200)
+
+    def test_changing_the_password_comes_back_to_my_account(self):
+        response = self.client.post(
+            reverse("console:password_change"),
+            {"old_password": "right-pass-5512", "new_password1": "fresh-pass-8823", "new_password2": "fresh-pass-8823"},
+        )
+        self.assertRedirects(response, reverse("console:my_account"))

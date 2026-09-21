@@ -37,7 +37,7 @@ class PasswordChangeTests(TestCase):
             self.url,
             {"old_password": "old-pass-9271", "new_password1": "new-pass-4823", "new_password2": "new-pass-4823"},
         )
-        self.assertRedirects(response, reverse("console:dashboard"))
+        self.assertRedirects(response, reverse("console:my_account"))
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("new-pass-4823"))
         self.assertEqual(self.client.get(reverse("console:dashboard")).status_code, 200)
@@ -538,6 +538,7 @@ class ConsoleAccessTests(TestCase):
     def staff_urls(self):
         return {
             "dashboard": [],
+            "my_account": [],
             "password_change": [],
             "clients": [],
             "client_new": [],

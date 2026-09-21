@@ -8,6 +8,8 @@ from catalog.models import Product, ProductVariant, StoreProduct
 from orders.models import Order
 from stores.models import Client, Store
 
+from .models import profile_for
+
 INPUT = "mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand focus:outline-none"
 
 
@@ -222,3 +224,44 @@ class ProductFilterForm(StyledFieldsMixin, forms.Form):
         required=False, label="In the catalog",
         choices=[("", "Active and inactive"), ("1", "Active only"), ("0", "Inactive only")],
     )
+
+
+class MyAccountForm(StyledFieldsMixin, forms.ModelForm):
+    """Someone editing their own details. Changing the email needs the current password."""
+
+    phone = forms.CharField(max_length=30, required=False, label="Phone", help_text="Where colleagues can reach you.")
+    current_password = forms.CharField(
+        required=False, widget=forms.PasswordInput,
+        label="Your current password",
+        help_text="Only needed if you're changing your email address.",
+    )
+
+    class Meta:
+        model = get_user_model()
+        fields = ["first_name", "last_name", "email"]
+        labels = {"first_name": "First name", "last_name": "Last name", "email": "Email address"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["email"].required = True
+        self.fields["phone"].initial = profile_for(self.instance).phone
+
+    def clean_email(self):
+        email = self.cleaned_data["email"]
+        if get_user_model()._default_manager.filter(email__iexact=email).exclude(pk=self.instance.pk).exists():
+            raise ValidationError("Another account already uses that email address.")
+        return email
+
+    def clean(self):
+        cleaned = super().clean()
+        email_changed = "email" in cleaned and cleaned["email"].lower() != (self.initial.get("email") or "").lower()
+        if email_changed and not self.instance.check_password(cleaned.get("current_password") or ""):
+            self.add_error("current_password", "Please enter your current password to change your email address.")
+        return cleaned
+
+    def save(self, commit=True):
+        user = super().save(commit)
+        profile = profile_for(user)
+        profile.phone = self.cleaned_data["phone"]
+        profile.save(update_fields=["phone"])
+        return user

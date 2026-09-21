@@ -31,6 +31,7 @@ from orders.models import Order, allowed_transitions, change_status
 from stores.models import Client, Store
 
 from .mail import site_url
+from .models import profile_for
 from .forms import (
     AddStoreProductsForm,
     ClientForm,
@@ -38,6 +39,7 @@ from .forms import (
     ConsolePasswordChangeForm,
     ConsolePasswordResetForm,
     ConsoleSetPasswordForm,
+    MyAccountForm,
     OrderFilterForm,
     OrderStatusForm,
     ProductFilterForm,
@@ -160,10 +162,27 @@ class ConsolePasswordResetDoneView(PasswordResetCompleteView):
     template_name = "console/password_reset_done.html"
 
 
+class MyAccountView(StaffRequiredMixin, SuccessMessageMixin, UpdateView):
+    """Everyone's own details. The password lives on its own page."""
+
+    form_class = MyAccountForm
+    template_name = "console/my_account.html"
+    success_url = reverse_lazy("console:my_account")
+    success_message = "Your details have been saved."
+
+    def get_object(self, queryset=None):
+        return self.request.user
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["profile"] = profile_for(self.request.user)
+        return ctx
+
+
 class ConsolePasswordChangeView(StaffRequiredMixin, SuccessMessageMixin, PasswordChangeView):
     form_class = ConsolePasswordChangeForm
     template_name = "console/password_change.html"
-    success_url = reverse_lazy("console:dashboard")
+    success_url = reverse_lazy("console:my_account")
     success_message = "Your password has been changed."
 
 
