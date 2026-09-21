@@ -1,7 +1,7 @@
 {% extends "console/email/base.html" %}{% block body %}
 <p style="margin:0 0 12px;">Hi {{ invitee_name|default:"there" }},</p>
 <p style="margin:0 0 12px;"><strong>{{ inviter_name }}</strong> has set up an Inked Graphics account for you, so you can manage client stores, products and orders.</p>
-<p style="margin:0 0 12px;">Your username is <strong>{{ username }}</strong>.</p>
+<p style="margin:0 0 12px;">You'll sign in with this email address — just choose a password.</p>
 {% include "console/email/button.html" with label="Set your password" %}
 <p style="margin:16px 0 0;color:#6b7280;font-size:13px;">This link works for the next 3 days. If it has expired by the time you get to it, ask {{ inviter_name }} for a new one.</p>
 {% endblock %}

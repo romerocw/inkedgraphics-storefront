@@ -49,7 +49,7 @@
         <li>
           <span class="muted">{{ change.changed_at|date:"M j, Y g:i a" }}</span> —
           marked {{ change.get_to_status_display|lower }}
-          {% if change.changed_by %}by {{ change.changed_by.get_username }}{% endif %}
+          {% if change.changed_by %}by {{ change.changed_by.get_full_name|default:change.changed_by.email }}{% endif %}
           {% if change.note %}<div class="muted ml-2">“{{ change.note }}”</div>{% endif %}
         </li>
         {% endfor %}

@@ -3,9 +3,7 @@
 {{ inviter_name }} has set up an Inked Graphics account for you, so you can manage
 client stores, products and orders.
 
-Your username is: {{ username }}
-
-Set your password to get started:
+You'll sign in with this email address. Set your password to get started:
 
 {{ url }}
 

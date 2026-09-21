@@ -10,7 +10,7 @@
 {% endif %}
 <form method="post">{% csrf_token %}
   <div class="mb-3">
-    <label for="{{ form.username.id_for_label }}" class="label">Username</label>
+    <label for="{{ form.username.id_for_label }}" class="label">Email address</label>
     {{ form.username }}
     {% for e in form.username.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
   </div>

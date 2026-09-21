@@ -24,7 +24,7 @@
       </div>
       {% if user.is_authenticated %}
       <form method="post" action="{% url 'console:logout' %}" class="text-sm">{% csrf_token %}
-        <a href="{% url 'console:my_account' %}" class="mr-3 text-gray-300 hover:text-white hover:underline">{{ user.get_username }}</a><button type="submit" class="hover:underline">Sign out</button>
+        <a href="{% url 'console:my_account' %}" class="mr-3 text-gray-300 hover:text-white hover:underline">{{ user.get_full_name|default:user.email }}</a><button type="submit" class="hover:underline">Sign out</button>
       </form>
       {% endif %}
     </div>

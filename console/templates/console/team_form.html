@@ -4,7 +4,7 @@
 <a href="{% url 'console:team' %}" class="muted text-sm hover:underline">&larr; Team</a>
 <h1 class="mt-1 mb-1 text-2xl font-bold">{{ title }}</h1>
 {% if member %}
-<p class="muted mb-4 text-sm">Signs in as <strong>{{ member.get_username }}</strong> · {{ profile.status_label }}{% if profile.invited_by %} · invited by {{ profile.invited_by.get_username }}{% endif %}</p>
+<p class="muted mb-4 text-sm">Signs in with <strong>{{ member.email }}</strong> · {{ profile.status_label }}{% if profile.invited_by %} · invited by {{ profile.invited_by.get_full_name|default:profile.invited_by.email }}{% endif %}</p>
 {% else %}
 <p class="muted mb-4 text-sm">We'll email them a link to set their own password. It works for 3 days.</p>
 {% endif %}

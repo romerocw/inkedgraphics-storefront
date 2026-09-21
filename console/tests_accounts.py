@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils.html import escape
 
+from console.checks import staff_can_sign_in
 from console.invitations import MAX_AGE
 from console.mail import send_console_email
 from console.models import StaffProfile, profile_for
@@ -138,53 +139,120 @@ class StaffProfileTests(TestCase):
         invited.save()
         self.assertEqual(profile_for(invited).status_label, "Invited")
 
-    def test_display_name_falls_back_to_the_username(self):
+    def test_display_name_falls_back_to_the_email_then_the_username(self):
         user = make_staff(username="dana", first_name="Dana", last_name="Whitfield")
         self.assertEqual(user.staff_profile.display_name, "Dana Whitfield")
-        self.assertEqual(make_staff(username="nameless").staff_profile.display_name, "nameless")
+        self.assertEqual(
+            make_staff(username="nameless", email="nameless@inkedgraphics.com").staff_profile.display_name,
+            "nameless@inkedgraphics.com",
+        )
+        self.assertEqual(make_staff(username="no-email", email="").staff_profile.display_name, "no-email")
 
 
 class LoginPageTests(TestCase):
+    """Staff sign in with their email address; the username is internal."""
+
+    NO_MATCH = escape("That email address and password don't match")
+
     def setUp(self):
-        self.user = make_staff(username="dana", password="right-pass-5512")
+        self.user = make_staff(username="dana-whitfield", password="right-pass-5512", email="dana@inkedgraphics.com")
+
+    def sign_in(self, email, password, **kwargs):
+        return self.client.post(reverse("console:login"), {"username": email, "password": password}, **kwargs)
+
+    def test_the_page_asks_for_an_email_address(self):
+        response = self.client.get(reverse("console:login"))
+        self.assertContains(response, "Email address")
+        self.assertContains(response, 'type="email"')
+        self.assertNotContains(response, "Username")
 
     def test_the_page_offers_a_way_out_of_a_forgotten_password(self):
         response = self.client.get(reverse("console:login"))
         self.assertContains(response, reverse("console:password_reset"))
         self.assertContains(response, "Forgot your password?")
 
+    def test_signing_in_with_the_email_lands_on_the_dashboard(self):
+        response = self.sign_in("dana@inkedgraphics.com", "right-pass-5512", follow=True)
+        self.assertRedirects(response, reverse("console:dashboard"))
+        self.assertEqual(int(self.client.session["_auth_user_id"]), self.user.pk)
+
+    def test_the_email_is_not_case_sensitive(self):
+        response = self.sign_in("Dana@InkedGraphics.COM", "right-pass-5512")
+        self.assertRedirects(response, reverse("console:dashboard"))
+
+    def test_the_internal_username_is_not_accepted(self):
+        response = self.sign_in("dana-whitfield", "right-pass-5512")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
     def test_a_wrong_password_says_nothing_about_the_account(self):
-        response = self.client.post(reverse("console:login"), {"username": "dana", "password": "wrong"})
-        self.assertContains(response, "Please enter a correct username and password")
+        response = self.sign_in("dana@inkedgraphics.com", "wrong")
+        self.assertContains(response, self.NO_MATCH)
         self.assertNotContains(response, "deactivated")
 
-    def test_an_unknown_username_says_nothing_about_the_account(self):
-        response = self.client.post(reverse("console:login"), {"username": "nobody", "password": "whatever"})
-        self.assertContains(response, "Please enter a correct username and password")
+    def test_an_unknown_address_gets_the_same_answer(self):
+        response = self.sign_in("nobody@inkedgraphics.com", "whatever")
+        self.assertContains(response, self.NO_MATCH)
+
+    def test_an_address_two_accounts_share_signs_nobody_in(self):
+        make_staff(email="DANA@inkedgraphics.com", password="right-pass-5512")
+        response = self.sign_in("dana@inkedgraphics.com", "right-pass-5512")
+        self.assertContains(response, self.NO_MATCH)
+        self.assertNotIn("_auth_user_id", self.client.session)
 
     def test_a_deactivated_user_with_the_right_password_is_told_why(self):
         self.user.is_active = False
         self.user.save(update_fields=["is_active"])
-        response = self.client.post(reverse("console:login"), {"username": "dana", "password": "right-pass-5512"})
+        response = self.sign_in("dana@inkedgraphics.com", "right-pass-5512")
         self.assertContains(response, "has been deactivated")
 
     def test_a_deactivated_user_with_a_wrong_password_learns_nothing(self):
         self.user.is_active = False
         self.user.save(update_fields=["is_active"])
-        response = self.client.post(reverse("console:login"), {"username": "dana", "password": "wrong"})
+        response = self.sign_in("dana@inkedgraphics.com", "wrong")
         self.assertNotContains(response, "deactivated")
-
-    def test_signing_in_works_and_lands_on_the_dashboard(self):
-        response = self.client.post(
-            reverse("console:login"), {"username": "dana", "password": "right-pass-5512"}, follow=True
-        )
-        self.assertRedirects(response, reverse("console:dashboard"))
+        self.assertContains(response, self.NO_MATCH)
 
     def test_signing_out_says_so_on_the_login_page(self):
         self.client.force_login(self.user)
         response = self.client.post(reverse("console:logout"), follow=True)
         self.assertRedirects(response, reverse("console:login"))
         self.assertContains(response, "You&#x27;ve been signed out")
+
+
+class SignInCheckTests(TestCase):
+    """The startup warnings that catch staff who'd be locked out of email sign-in."""
+
+    def warnings(self):
+        return staff_can_sign_in(None, databases=["default"])
+
+    def test_quiet_when_everyone_has_their_own_address(self):
+        make_staff(email="one@inkedgraphics.com")
+        make_staff(email="two@inkedgraphics.com")
+        self.assertEqual(self.warnings(), [])
+
+    def test_warns_about_active_staff_with_no_email(self):
+        make_staff(username="no-email", email="")
+        (warning,) = self.warnings()
+        self.assertEqual(warning.id, "console.W001")
+        self.assertIn('"no-email"', warning.msg)
+
+    def test_ignores_deactivated_accounts_and_non_staff(self):
+        gone = make_staff(email="")
+        gone.is_active = False
+        gone.save(update_fields=["is_active"])
+        get_user_model().objects.create_user("buyer", email="", password="x-pass-7781")
+        self.assertEqual(self.warnings(), [])
+
+    def test_warns_about_a_shared_address_whatever_its_case(self):
+        make_staff(email="shared@inkedgraphics.com")
+        make_staff(email="Shared@InkedGraphics.com")
+        (warning,) = self.warnings()
+        self.assertEqual(warning.id, "console.W002")
+
+    def test_skipped_unless_database_checks_are_asked_for(self):
+        make_staff(email="")
+        self.assertEqual(staff_can_sign_in(None), [])
 
 
 class PasswordResetFlowTests(TestCase):
@@ -213,7 +281,10 @@ class PasswordResetFlowTests(TestCase):
         self.assertRedirects(done, reverse("console:password_reset_done"))
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("brand-new-7741"))
-        self.assertTrue(self.client.login(username="dana", password="brand-new-7741"))
+        signed_in = self.client.post(
+            reverse("console:login"), {"username": "dana@inkedgraphics.com", "password": "brand-new-7741"}
+        )
+        self.assertRedirects(signed_in, reverse("console:dashboard"))
 
     def test_an_unknown_address_looks_exactly_the_same_and_emails_nobody(self):
         response = self.client.post(reverse("console:password_reset"), {"email": "stranger@example.com"})
@@ -367,7 +438,10 @@ class TeamInviteTests(TestCase):
 
         self.assertEqual(mail.outbox[0].to, ["dana@inkedgraphics.com"])
         self.assertIn("/console/invite/", mail.outbox[0].body)
-        self.assertIn("dana", mail.outbox[0].body)  # their username
+        text, (html, _) = mail.outbox[0].body, mail.outbox[0].alternatives[0]
+        for part in (text, html):
+            self.assertNotIn("username", part.lower())
+            self.assertIn("sign in with this email address", part)
         self.assertContains(response, "Invitation sent to dana@inkedgraphics.com")
 
     def test_an_address_already_in_use_is_refused(self):
@@ -529,7 +603,7 @@ class InvitationLifecycleTests(TestCase):
     def test_accepting_sets_the_password_switches_the_account_on_and_signs_them_in(self):
         page = self.client.get(self.path)
         self.assertContains(page, "Set your password")
-        self.assertContains(page, "dana")
+        self.assertContains(page, "You'll sign in with <strong>dana@inkedgraphics.com</strong>")
 
         response = self.accept()
         self.invited.refresh_from_db()
@@ -583,4 +657,8 @@ class InvitationLifecycleTests(TestCase):
         self.assertContains(response, "has already set up their account")
 
     def test_an_invited_account_cannot_be_signed_into_yet(self):
-        self.assertFalse(self.client.login(username="dana", password="chosen-pass-4417"))
+        response = self.client.post(
+            reverse("console:login"), {"username": "dana@inkedgraphics.com", "password": "chosen-pass-4417"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("_auth_user_id", self.client.session)

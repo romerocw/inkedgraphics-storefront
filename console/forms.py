@@ -1,5 +1,5 @@
 from django import forms
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, PasswordResetForm, SetPasswordForm
 from django.core.exceptions import ValidationError
 from django.utils.text import slugify
@@ -83,26 +83,54 @@ class ConsolePasswordResetForm(StyledFieldsMixin, PasswordResetForm):
     pass
 
 
-class ConsoleAuthenticationForm(StyledFieldsMixin, AuthenticationForm):
-    """Sign-in form that explains a deactivated account instead of just failing."""
+def user_for_email(email):
+    """The one account with this email address (any case), or None if there's none or several."""
+    matches = list(get_user_model()._default_manager.filter(email__iexact=email.strip())[:2])
+    return matches[0] if len(matches) == 1 else None
 
+
+class ConsoleAuthenticationForm(StyledFieldsMixin, AuthenticationForm):
+    """Staff sign in with their email address. The username is internal and never typed."""
+
+    # AuthenticationForm calls this field "username"; LoginView and the template rely on that.
+    username = forms.EmailField(
+        label="Email address",
+        widget=forms.EmailInput(attrs={"autofocus": True, "autocomplete": "email"}),
+    )
+    error_messages = {
+        **AuthenticationForm.error_messages,
+        "invalid_login": "That email address and password don't match. Check them and try again — the password is case-sensitive.",
+    }
     deactivated = "This account has been deactivated. Ask an owner or manager to turn it back on."
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # AuthenticationForm sizes this field for usernames (150); emails can run to 254.
+        self.fields["username"].max_length = 254
+        self.fields["username"].widget.attrs["maxlength"] = 254
+
     def clean(self):
-        try:
-            return super().clean()
-        except ValidationError:
+        email = self.cleaned_data.get("username")
+        password = self.cleaned_data.get("password")
+        if not (email and password):
+            return self.cleaned_data
+
+        user = user_for_email(email)
+        if user is None:
+            # Hash anyway, as Django's own backend does, so an unknown address takes as long
+            # to refuse as a wrong password and can't be discovered by timing.
+            get_user_model()().set_password(password)
+            raise self.get_invalid_login_error()
+
+        self.user_cache = authenticate(self.request, username=user.get_username(), password=password)
+        if self.user_cache is None:
             # Only say "deactivated" when the password was right, so the form can't be
             # used to find out which addresses belong to staff.
-            username = self.cleaned_data.get("username")
-            password = self.cleaned_data.get("password")
-            if username and password:
-                user = get_user_model()._default_manager.filter(
-                    **{get_user_model().USERNAME_FIELD: username}
-                ).first()
-                if user and not user.is_active and user.check_password(password):
-                    raise ValidationError(self.deactivated, code="deactivated")
-            raise
+            if not user.is_active and user.check_password(password):
+                raise ValidationError(self.deactivated, code="deactivated")
+            raise self.get_invalid_login_error()
+        self.confirm_login_allowed(self.user_cache)
+        return self.cleaned_data
 
 
 class ConsoleStoreProductForm(StyledForm):

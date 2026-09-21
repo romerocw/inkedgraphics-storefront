@@ -2,7 +2,7 @@
 {% block title %}My account{% endblock %}
 {% block content %}
 <h1 class="mb-1 text-2xl font-bold">My account</h1>
-<p class="muted mb-6 text-sm">You're signed in as <strong>{{ user.get_username }}</strong> · {{ profile.get_role_display }}{% if profile.job_title %} · {{ profile.job_title }}{% endif %}</p>
+<p class="muted mb-6 text-sm">You sign in with <strong>{{ user.email }}</strong> · {{ profile.get_role_display }}{% if profile.job_title %} · {{ profile.job_title }}{% endif %}</p>
 <div class="grid gap-6 lg:grid-cols-3">
   <form method="post" class="card lg:col-span-2">{% csrf_token %}
     {% if form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}

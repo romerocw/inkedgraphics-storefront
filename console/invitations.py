@@ -60,8 +60,7 @@ def send_invitation(request, user, invited_by):
         "invitation",
         {
             "invitee_name": user.get_short_name() or "",
-            "inviter_name": invited_by.get_full_name() or invited_by.get_username(),
-            "username": user.get_username(),
+            "inviter_name": invited_by.get_full_name() or invited_by.email or "A colleague",
             "url": invitation_url(request, user),
             "site_url": site_url(request),
         },

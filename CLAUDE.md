@@ -48,6 +48,11 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   point at them. Nobody deactivates themselves; the last active owner can't be demoted or
   switched off. Status on the team list is derived: active / invited (no password yet) /
   deactivated.
+- Staff sign in with their **email address** (case-insensitive, `ConsoleAuthenticationForm`).
+  The username is internal — generated at invitation, never shown or typed. An address two
+  accounts share signs nobody in; `console/checks.py` warns (in `migrate`/`check` output) about
+  active staff with no email or a shared one, since they're locked out. `/django-admin/` still
+  uses Django's username login.
 - Invitations: the account is created switched off with an unusable password and a username
   built from the email address; the emailed link is a `TimestampSigner` token that lasts 72
   hours (`console/invitations.py`). Setting a password spends the invitation, so a link can't

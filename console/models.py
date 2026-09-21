@@ -47,7 +47,7 @@ class StaffProfile(models.Model):
 
     @property
     def display_name(self):
-        return self.user.get_full_name() or self.user.get_username()
+        return self.user.get_full_name() or self.user.email or self.user.get_username()
 
 
 def profile_for(user):

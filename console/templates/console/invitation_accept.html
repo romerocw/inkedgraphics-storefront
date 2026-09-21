@@ -3,7 +3,7 @@
 {% block tagline %}Welcome to the store console{% endblock %}
 {% block card %}
 <h1 class="mb-1 text-xl font-bold">Set your password</h1>
-<p class="muted mb-4 text-sm">You'll sign in as <strong>{{ invited_user.get_username }}</strong>.</p>
+<p class="muted mb-4 text-sm">You'll sign in with <strong>{{ invited_user.email }}</strong>.</p>
 <form method="post">{% csrf_token %}
   {% if form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
   {% for field in form %}
