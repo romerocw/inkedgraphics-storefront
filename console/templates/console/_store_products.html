@@ -53,5 +53,5 @@
   });
 </script>
 {% else %}
-<p class="muted">Every active product in the catalog is already in this store.</p>
+<p class="muted">Every active product in the catalog is already in this store. <a href="{% url 'console:products' %}" class="text-brand hover:underline">Add a new product to the catalog</a> to offer something else.</p>
 {% endif %}

@@ -8,6 +8,7 @@ from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView
 from django.contrib.messages.views import SuccessMessageMixin
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
@@ -27,6 +28,9 @@ from .forms import (
     ConsolePasswordChangeForm,
     OrderFilterForm,
     OrderStatusForm,
+    ProductFilterForm,
+    ProductForm,
+    ProductVariantFormSet,
     StoreForm,
     StoreProductFormSet,
 )
@@ -364,3 +368,60 @@ class OrdersBulkView(StaffRequiredMixin, View):
         if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
             return redirect(next_url)
         return redirect("console:orders")
+
+
+class ProductListView(StaffRequiredMixin, ListView):
+    template_name = "console/product_list.html"
+
+    def get_queryset(self):
+        products = Product.objects.annotate(variant_count=Count("variants"))
+        search = (self.request.GET.get("q") or "").strip()
+        if search:
+            products = products.filter(Q(name__icontains=search) | Q(sku_prefix__icontains=search))
+        active = self.request.GET.get("active")
+        if active in ("0", "1"):
+            products = products.filter(is_active=active == "1")
+        return products
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["filter_form"] = ProductFilterForm(self.request.GET or None)
+        return ctx
+
+
+class ProductFormMixin(StaffRequiredMixin):
+    """Product form plus its size/color rows, saved together."""
+
+    model, form_class = Product, ProductForm
+    template_name = "console/product_form.html"
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        if "formset" not in ctx:
+            product = self.object
+            ctx["formset"] = ProductVariantFormSet(
+                instance=product, form_kwargs={"sku_prefix": product.sku_prefix if product else ""}
+            )
+        return ctx
+
+    def form_valid(self, form):
+        formset = ProductVariantFormSet(
+            self.request.POST, instance=form.instance, form_kwargs={"sku_prefix": form.cleaned_data["sku_prefix"]}
+        )
+        if not formset.is_valid():
+            messages.error(self.request, "Nothing was saved — please check the sizes and colors below.")
+            return self.render_to_response(self.get_context_data(form=form, formset=formset))
+        with transaction.atomic():
+            self.object = form.save()
+            formset.instance = self.object
+            formset.save()
+        messages.success(self.request, f"Saved {self.object.name}.")
+        return redirect("console:product_edit", pk=self.object.pk)
+
+
+class ProductCreateView(ProductFormMixin, CreateView):
+    extra_context = {"title": "New product"}
+
+
+class ProductUpdateView(ProductFormMixin, UpdateView):
+    extra_context = {"title": "Edit product"}

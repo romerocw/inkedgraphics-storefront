@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth.forms import PasswordChangeForm
 from django.utils.text import slugify
 
-from catalog.models import StoreProduct
+from catalog.models import Product, ProductVariant, StoreProduct
 from orders.models import Order
 from stores.models import Client, Store
 
@@ -135,3 +135,58 @@ class OrderStatusForm(forms.Form):
 
     to_status = forms.ChoiceField(choices=Order.Status.choices)
     note = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2, "class": INPUT}))
+
+
+class ProductForm(StyledForm):
+    class Meta:
+        model = Product
+        fields = ["name", "sku_prefix", "description", "image", "default_price", "cost", "is_active"]
+        widgets = {"description": forms.Textarea(attrs={"rows": 3})}
+        labels = {"sku_prefix": "SKU prefix", "is_active": "In the catalog"}
+
+
+def unique_sku(sku_prefix, color, size, exclude_pk=None):
+    """Build 'PREFIX-COLOR-SIZE', adding -2, -3... if that SKU is already used."""
+    base = "-".join(part.strip() for part in (sku_prefix, color, size) if part.strip()).upper().replace(" ", "-")
+    base = base or "SKU"
+    taken = ProductVariant.objects.exclude(pk=exclude_pk) if exclude_pk else ProductVariant.objects.all()
+    sku, n = base, 2
+    while taken.filter(sku=sku).exists():
+        sku, n = f"{base}-{n}", n + 1
+    return sku
+
+
+class ProductVariantForm(StyledForm):
+    """One size/color row. A blank SKU is filled in from the product's prefix."""
+
+    class Meta:
+        model = ProductVariant
+        fields = ["color", "size", "sku", "upcharge", "is_active", "sort_order"]
+        labels = {"is_active": "For sale", "sort_order": "Order"}
+
+    def __init__(self, *args, sku_prefix="", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sku_prefix = sku_prefix
+        self.fields["sku"].required = False
+        self.fields["sku"].help_text = "Leave blank to build it from the SKU prefix, color and size."
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("sku"):
+            cleaned["sku"] = unique_sku(
+                self.sku_prefix, cleaned.get("color", ""), cleaned.get("size", ""), exclude_pk=self.instance.pk
+            )
+        return cleaned
+
+
+ProductVariantFormSet = forms.inlineformset_factory(
+    Product, ProductVariant, form=ProductVariantForm, extra=2, can_delete=True
+)
+
+
+class ProductFilterForm(StyledFieldsMixin, forms.Form):
+    q = forms.CharField(required=False, label="Search", widget=forms.TextInput(attrs={"placeholder": "Product name or SKU prefix"}))
+    active = forms.ChoiceField(
+        required=False, label="In the catalog",
+        choices=[("", "Active and inactive"), ("1", "Active only"), ("0", "Inactive only")],
+    )

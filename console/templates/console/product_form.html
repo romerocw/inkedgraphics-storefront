@@ -1,0 +1,42 @@
+{% extends "console/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<a href="{% url 'console:products' %}" class="muted text-sm hover:underline">&larr; All products</a>
+<h1 class="mt-1 mb-4 text-2xl font-bold">{{ title }}</h1>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
+  <div class="card max-w-xl">
+    {% for field in form %}
+    <div class="mb-4">
+      <label for="{{ field.id_for_label }}" class="label">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="muted mt-1 text-xs">{{ field.help_text }}</p>{% endif %}
+      {% for e in field.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <h2 class="mt-8 mb-1 text-lg font-semibold">Sizes and colors</h2>
+  <p class="muted mb-3 text-sm">Buyers pick one of these. Leave the SKU blank and we'll build it from the SKU prefix, color and size.</p>
+  {{ formset.management_form }}
+  {% if formset.non_form_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ formset.non_form_errors }}</div>{% endif %}
+  <table class="cart">
+    <tr><th>Color</th><th>Size</th><th>SKU</th><th>Size upcharge</th><th>For sale</th><th>Order</th><th>Remove</th></tr>
+    {% for f in formset %}
+    <tr>
+      {% for field in f.visible_fields %}
+      <td>
+        {% if forloop.first %}{% for hidden in f.hidden_fields %}{{ hidden }}{% endfor %}{% endif %}
+        {{ field }}
+        {% for e in field.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="mt-6 flex items-center gap-3">
+    <button type="submit" class="btn">Save product</button>
+    <a href="{% url 'console:products' %}" class="muted hover:underline">Cancel</a>
+  </div>
+</form>
+{% endblock %}

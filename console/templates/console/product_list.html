@@ -1,0 +1,40 @@
+{% extends "console/base.html" %}
+{% block title %}Products{% endblock %}
+{% block content %}
+<div class="mb-4 flex items-center justify-between">
+  <h1 class="text-2xl font-bold">Products</h1>
+  <a href="{% url 'console:product_new' %}" class="btn">New product</a>
+</div>
+<form method="get" class="card mb-4 flex flex-wrap items-end gap-4">
+  <div class="grow basis-64">
+    <label for="{{ filter_form.q.id_for_label }}" class="label">{{ filter_form.q.label }}</label>
+    {{ filter_form.q }}
+  </div>
+  <div class="basis-56">
+    <label for="{{ filter_form.active.id_for_label }}" class="label">{{ filter_form.active.label }}</label>
+    {{ filter_form.active }}
+  </div>
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn">Search</button>
+    <a href="{% url 'console:products' %}" class="muted hover:underline">Clear</a>
+  </div>
+</form>
+<table class="cart">
+  <tr><th>Product</th><th>SKU prefix</th><th>Usual price</th><th>Your cost</th><th>Sizes / colors</th><th>In the catalog</th></tr>
+  {% for p in object_list %}
+  <tr>
+    <td class="flex items-center gap-2">
+      {% if p.image %}<img src="{{ p.image.url }}" alt="" class="h-8 w-8 rounded object-cover">{% endif %}
+      <a href="{% url 'console:product_edit' p.pk %}" class="font-medium text-brand hover:underline">{{ p.name }}</a>
+    </td>
+    <td class="muted">{{ p.sku_prefix }}</td>
+    <td>${{ p.default_price|floatformat:2 }}</td>
+    <td>{% if p.cost %}${{ p.cost|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td>{{ p.variant_count }}</td>
+    <td>{% if p.is_active %}<span class="rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">Yes</span>{% else %}<span class="rounded bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-700">No</span>{% endif %}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="muted">{% if filter_form.data %}No products match that search.{% else %}No products yet. Press "New product" to add the first one.{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

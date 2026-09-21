@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from catalog.models import Product, ProductVariant
 from orders.models import Order
 from stores.factories import make_client, make_offering, make_order, make_product, make_staff, make_store
 
@@ -391,3 +392,128 @@ class OrdersCSVTests(TestCase):
     def test_a_store_with_no_orders_exports_just_the_header(self):
         self.order.delete()
         self.assertEqual(self.rows(self.fetch()), [self.EXPECTED_COLUMNS])
+
+
+class ProductCatalogTests(TestCase):
+    def setUp(self):
+        self.client.force_login(make_staff())
+
+    def variant_rows(self, rows, total=None, initial=0):
+        data = {"variants-TOTAL_FORMS": str(total if total is not None else len(rows)), "variants-INITIAL_FORMS": str(initial)}
+        for i, row in enumerate(rows):
+            for field, value in row.items():
+                data[f"variants-{i}-{field}"] = value
+        return data
+
+    def product_fields(self, **overrides):
+        fields = {"name": "Unisex Hoodie", "sku_prefix": "HOOD-U", "default_price": "45.00", "is_active": "on"}
+        fields.update(overrides)
+        return fields
+
+    def test_new_product_saves_with_its_variants(self):
+        response = self.client.post(
+            reverse("console:product_new"),
+            {
+                **self.product_fields(),
+                **self.variant_rows([
+                    {"color": "Black", "size": "M", "sku": "", "upcharge": "0", "is_active": "on", "sort_order": "0"},
+                    {"color": "Black", "size": "2XL", "sku": "", "upcharge": "2.00", "is_active": "on", "sort_order": "1"},
+                ]),
+            },
+            follow=True,
+        )
+        product = Product.objects.get(sku_prefix="HOOD-U")
+        self.assertEqual(
+            sorted(product.variants.values_list("sku", flat=True)), ["HOOD-U-BLACK-2XL", "HOOD-U-BLACK-M"]
+        )
+        self.assertEqual(product.variants.get(size="2XL").upcharge, Decimal("2.00"))
+        self.assertContains(response, "Saved Unisex Hoodie")
+
+    def test_sku_is_built_from_prefix_color_and_size_uppercased(self):
+        self.client.post(
+            reverse("console:product_new"),
+            {
+                **self.product_fields(sku_prefix="tee-w"),
+                **self.variant_rows([{"color": "forest green", "size": "lg", "sku": "", "upcharge": "0", "sort_order": "0"}]),
+            },
+        )
+        self.assertEqual(ProductVariant.objects.get().sku, "TEE-W-FOREST-GREEN-LG")
+
+    def test_a_typed_sku_is_kept(self):
+        self.client.post(
+            reverse("console:product_new"),
+            {
+                **self.product_fields(),
+                **self.variant_rows([{"color": "Black", "size": "M", "sku": "CUSTOM-1", "upcharge": "0", "sort_order": "0"}]),
+            },
+        )
+        self.assertEqual(ProductVariant.objects.get().sku, "CUSTOM-1")
+
+    def test_a_clashing_generated_sku_gets_a_suffix(self):
+        # Another product already owns the SKU this one would generate.
+        squatter = make_product(name="Old Hoodie", sku_prefix="OLD", variants=[])
+        ProductVariant.objects.create(product=squatter, color="Black", size="M", sku="HOOD-U-BLACK-M")
+
+        self.client.post(
+            reverse("console:product_new"),
+            {
+                **self.product_fields(name="New Hoodie", sku_prefix="HOOD-U"),
+                **self.variant_rows([{"color": "Black", "size": "M", "sku": "", "upcharge": "0", "sort_order": "0"}]),
+            },
+        )
+        self.assertEqual(Product.objects.get(name="New Hoodie").variants.get().sku, "HOOD-U-BLACK-M-2")
+
+    def test_editing_a_product_updates_and_removes_variants(self):
+        product = make_product(name="Hoodie", sku_prefix="HOOD", variants=[("Black", "M"), ("Black", "L")])
+        keep, drop = product.variants.order_by("pk")
+        self.client.post(
+            reverse("console:product_edit", args=[product.pk]),
+            {
+                **self.product_fields(name="Hoodie", sku_prefix="HOOD", default_price="50.00"),
+                **self.variant_rows(
+                    [
+                        {"id": str(keep.pk), "color": "Black", "size": "M", "sku": keep.sku, "upcharge": "3.00", "is_active": "on", "sort_order": "5"},
+                        {"id": str(drop.pk), "color": "Black", "size": "L", "sku": drop.sku, "upcharge": "0", "sort_order": "1", "DELETE": "on"},
+                    ],
+                    initial=2,
+                ),
+            },
+        )
+        product.refresh_from_db()
+        keep.refresh_from_db()
+        self.assertEqual(product.default_price, Decimal("50.00"))
+        self.assertEqual((keep.upcharge, keep.sort_order), (Decimal("3.00"), 5))
+        self.assertFalse(product.variants.filter(pk=drop.pk).exists())
+
+    def test_a_duplicate_size_and_color_saves_nothing(self):
+        response = self.client.post(
+            reverse("console:product_new"),
+            {
+                **self.product_fields(),
+                **self.variant_rows([
+                    {"color": "Black", "size": "M", "sku": "", "upcharge": "0", "sort_order": "0"},
+                    {"color": "Black", "size": "M", "sku": "", "upcharge": "0", "sort_order": "1"},
+                ]),
+            },
+        )
+        self.assertFalse(Product.objects.filter(sku_prefix="HOOD-U").exists())
+        self.assertContains(response, "Nothing was saved")
+
+    def test_list_search_and_active_filter(self):
+        make_product(name="Cotton Tee", sku_prefix="TEE")
+        make_product(name="Wool Hoodie", sku_prefix="HOOD")
+        make_product(name="Retired Cap", sku_prefix="CAP", is_active=False)
+
+        names = lambda response: {p.name for p in response.context["object_list"]}
+        self.assertEqual(len(names(self.client.get(reverse("console:products")))), 3)
+        self.assertEqual(names(self.client.get(reverse("console:products"), {"q": "hood"})), {"Wool Hoodie"})
+        self.assertEqual(names(self.client.get(reverse("console:products"), {"q": "TEE"})), {"Cotton Tee"})
+        self.assertEqual(names(self.client.get(reverse("console:products"), {"active": "0"})), {"Retired Cap"})
+        self.assertEqual(
+            names(self.client.get(reverse("console:products"), {"active": "1"})), {"Cotton Tee", "Wool Hoodie"}
+        )
+
+    def test_list_counts_variants(self):
+        make_product(name="Hoodie", sku_prefix="HOOD", variants=[("Black", "M"), ("Black", "L")])
+        response = self.client.get(reverse("console:products"))
+        self.assertEqual(response.context["object_list"][0].variant_count, 2)
