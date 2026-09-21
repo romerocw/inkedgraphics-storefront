@@ -9,8 +9,9 @@
   <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-[10rem_1fr]">
     <dt class="muted text-sm">Store name</dt><dd>{{ store.name }}</dd>
     <dt class="muted text-sm">Client</dt><dd><a href="{% url 'console:client_edit' store.client.pk %}" class="text-brand hover:underline">{{ store.client.name }}</a></dd>
-    <dt class="muted text-sm">Opens</dt><dd>{{ store.opens_at|date:"M j, Y, g:i a"|default:"Not set" }}</dd>
-    <dt class="muted text-sm">Closes</dt><dd>{{ store.closes_at|date:"M j, Y, g:i a"|default:"Not set" }}</dd>
+    <dt class="muted text-sm">Time zone</dt><dd>{{ store.get_time_zone_display }}</dd>
+    <dt class="muted text-sm">Opens</dt><dd>{{ store.opens_local|date:"M j, Y, g:i a T"|default:"Not set" }}</dd>
+    <dt class="muted text-sm">Closes</dt><dd>{{ store.closes_local|date:"M j, Y, g:i a T"|default:"Not set" }}</dd>
     <dt class="muted text-sm">Public link</dt>
     <dd><a href="{% url 'store_detail' store.slug %}" target="_blank" class="text-brand hover:underline">{{ store.slug }}</a>{% if store.subdomain %} <span class="muted">· {{ store.subdomain }}.inkedgraphics.com</span>{% endif %}</dd>
   </dl>

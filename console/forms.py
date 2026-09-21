@@ -1,3 +1,6 @@
+import datetime
+from zoneinfo import ZoneInfo
+
 from django import forms
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, PasswordResetForm, SetPasswordForm
@@ -6,7 +9,7 @@ from django.utils.text import slugify
 
 from catalog.models import Product, ProductVariant, StoreProduct
 from orders.models import Order
-from stores.models import Client, Store
+from stores.models import TIME_ZONES, Client, Store
 
 from .models import StaffProfile, profile_for
 from .permissions import can_change_role, can_invite
@@ -47,23 +50,70 @@ class ClientForm(StyledForm):
         return super().save(commit)
 
 
+class WallClockDateTimeField(forms.DateTimeField):
+    """A date and time exactly as typed, with no time zone yet; the form attaches one.
+
+    Django's own field reads typed times in the site's zone, but a store's times are meant
+    in the store's zone, which is picked in the same form.
+    """
+
+    def to_python(self, value):
+        if value in self.empty_values:
+            return None
+        if isinstance(value, datetime.datetime):
+            return value
+        return forms.fields.BaseTemporalField.to_python(self, value)
+
+
 class StoreForm(StyledForm):
+    DATE_FIELDS = ("opens_at", "closes_at")
+
     class Meta:
         model = Store
-        fields = ["client", "name", "status", "opens_at", "closes_at", "primary_color", "subdomain"]
+        fields = ["client", "name", "status", "time_zone", "opens_at", "closes_at", "primary_color", "subdomain"]
+        field_classes = {"opens_at": WallClockDateTimeField, "closes_at": WallClockDateTimeField}
         widgets = {
             "opens_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
             "closes_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
             "primary_color": forms.TextInput(attrs={"type": "color", "class": "mt-1 h-10 w-20"}),
         }
-        labels = {"primary_color": "Store color (overrides client color)"}
+        labels = {
+            "primary_color": "Store color (overrides client color)",
+            "time_zone": "Store time zone",
+            "opens_at": "Opens at (store time)",
+            "closes_at": "Closes at (store time)",
+        }
 
     def __init__(self, *args, **kwargs):
+        given = kwargs.get("initial") or {}
         super().__init__(*args, **kwargs)
-        for f in ("opens_at", "closes_at"):
+        for f in self.DATE_FIELDS:
             self.fields[f].input_formats = ["%Y-%m-%dT%H:%M"]
+            # Show saved times on the store's clock, not the site's or the viewer's.
+            value = getattr(self.instance, f)
+            if value and f not in given:
+                self.initial[f] = value.astimezone(self.instance.zone).replace(tzinfo=None)
         if not self.instance.pk:
             self.fields["primary_color"].initial = ""
+
+    def clean(self):
+        cleaned = super().clean()
+        zone_name = cleaned.get("time_zone") or self.instance.time_zone
+        zone = ZoneInfo(zone_name)
+        zone_label = dict(TIME_ZONES).get(zone_name, zone_name)
+        for f in self.DATE_FIELDS:
+            typed = cleaned.get(f)
+            if typed is None or typed.tzinfo is not None:
+                continue
+            moment = typed.replace(tzinfo=zone)
+            if moment.astimezone(datetime.timezone.utc).astimezone(zone).replace(tzinfo=None) != typed:
+                self.add_error(f, f"{typed:%-I:%M %p} doesn't happen that day in {zone_label} time — the clocks skip it. Pick a time an hour later.")
+                continue
+            cleaned[f] = moment
+        opens, closes = cleaned.get("opens_at"), cleaned.get("closes_at")
+        if opens and closes and opens.tzinfo and closes.tzinfo and closes <= opens:
+            self.add_error("closes_at", "The store has to close after it opens.")
+        return cleaned
 
     def save(self, commit=True):
         if not self.instance.slug:

@@ -23,7 +23,7 @@
     <table class="cart">
       <tr><th>Store</th><th>Client</th><th>Closes</th></tr>
       {% for s in closing_soon %}
-      <tr><td><a href="{% url 'console:store_detail' s.pk %}" class="text-brand hover:underline">{{ s.name }}</a></td><td>{{ s.client.name }}</td><td>{{ s.closes_at|date:"M j, g:i a" }}</td></tr>
+      <tr><td><a href="{% url 'console:store_detail' s.pk %}" class="text-brand hover:underline">{{ s.name }}</a></td><td>{{ s.client.name }}</td><td>{{ s.closes_local|date:"M j, g:i a T" }}</td></tr>
       {% empty %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
     </table>
   </div>

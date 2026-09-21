@@ -4,7 +4,7 @@
 {% block content %}
 <h1 class="text-2xl font-bold">{{ store.name }}</h1>
 {% if is_open %}
-  {% if store.closes_at %}<p class="muted mb-6">Store closes {{ store.closes_at|date:"F j, Y" }}.</p>{% endif %}
+  {% if store.closes_at %}<p class="muted mb-6">Store closes {{ store.closes_local|date:"F j, Y, g:i a T" }}.</p>{% endif %}
   <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
   {% for item in offerings %}
     <div class="card">
@@ -31,7 +31,7 @@
   {% endfor %}
   </div>
 {% elif store.status == "scheduled" %}
-  <p class="mt-4">This store opens {% if store.opens_at %}{{ store.opens_at|date:"F j, Y" }}{% else %}soon{% endif %}.</p>
+  <p class="mt-4">This store opens {% if store.opens_at %}{{ store.opens_local|date:"F j, Y, g:i a T" }}{% else %}soon{% endif %}.</p>
 {% else %}
   <p class="mt-4">This store is closed.</p>
 {% endif %}

@@ -165,7 +165,7 @@ class OrderConfirmationTests(TestCase):
                 self.assertIn("$80.00", body)
                 self.assertIn("$15.00", body)
                 self.assertIn("$95.00", body)
-                self.assertIn("October 3, 2026", body)
+                self.assertIn("October 3, 2026 at 2:00 p.m. EDT", body)  # 18:00 UTC, Eastern store
                 self.assertIn("produced after the store closes", body)
             self.assertIn(order_url(order), email.text_body)
         self.assertIn(order_url(order), email.html_body)

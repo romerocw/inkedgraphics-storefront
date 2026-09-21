@@ -12,8 +12,8 @@
     <td><a href="{% url 'console:store_detail' s.pk %}" class="font-medium text-brand hover:underline">{{ s.name }}</a></td>
     <td>{{ s.client.name }}</td>
     <td>{% include "console/_store_status.html" with store=s %}</td>
-    <td>{{ s.opens_at|date:"M j, Y"|default:"—" }}</td>
-    <td>{{ s.closes_at|date:"M j, Y"|default:"—" }}</td>
+    <td>{{ s.opens_local|date:"M j, Y"|default:"—" }}</td>
+    <td>{{ s.closes_local|date:"M j, Y"|default:"—" }}</td>
     <td>{{ s.paid_orders }}</td>
     <td>${{ s.revenue|default:0|floatformat:2 }}</td>
     <td class="text-right"><a href="{% url 'store_detail' s.slug %}" target="_blank" class="muted hover:underline">View store &nearr;</a></td>

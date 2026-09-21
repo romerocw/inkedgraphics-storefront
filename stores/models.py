@@ -1,4 +1,20 @@
+from zoneinfo import ZoneInfo
+
 from django.db import models
+from django.templatetags.tz import do_timezone
+
+# Where a store's open/close times are meant. Times are typed and shown in the store's zone,
+# whoever is looking; everything else on the site uses settings.TIME_ZONE (Eastern).
+DEFAULT_TIME_ZONE = "America/New_York"
+TIME_ZONES = [
+    ("America/New_York", "Eastern"),
+    ("America/Chicago", "Central"),
+    ("America/Denver", "Mountain"),
+    ("America/Phoenix", "Arizona (no daylight saving)"),
+    ("America/Los_Angeles", "Pacific"),
+    ("America/Anchorage", "Alaska"),
+    ("Pacific/Honolulu", "Hawaii"),
+]
 
 
 class Client(models.Model):
@@ -44,8 +60,18 @@ class Store(models.Model):
         max_length=7, blank=True,
         help_text="Hex color for this store, e.g. #228B22. Blank = use the client's color.",
     )
-    opens_at = models.DateTimeField(null=True, blank=True)
-    closes_at = models.DateTimeField(null=True, blank=True)
+    time_zone = models.CharField(
+        max_length=40, choices=TIME_ZONES, default=DEFAULT_TIME_ZONE,
+        help_text="The store's local time zone. Open and close times are typed and shown in it.",
+    )
+    opens_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When a scheduled store opens by itself, in the store's time zone. Blank = open it by hand.",
+    )
+    closes_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When an open store closes by itself, in the store's time zone. Blank = close it by hand.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -54,3 +80,17 @@ class Store(models.Model):
 
     def __str__(self):
         return f"{self.client} — {self.name}"
+
+    @property
+    def zone(self):
+        return ZoneInfo(self.time_zone)
+
+    # For templates: the times in the store's zone. The date filter leaves these alone instead
+    # of converting them to the site zone, so "g:i a T" shows e.g. "6:00 p.m. PDT".
+    @property
+    def opens_local(self):
+        return do_timezone(self.opens_at, self.zone) if self.opens_at else None
+
+    @property
+    def closes_local(self):
+        return do_timezone(self.closes_at, self.zone) if self.closes_at else None

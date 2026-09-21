@@ -10,7 +10,7 @@ Order number: {{ order.order_number }}
 Total paid: ${{ order.total|floatformat:2 }}
 
 What happens next
-{% if store.closes_at %}The store closes on {{ store.closes_at|date:"F j, Y" }}.{% else %}The store will close at the end of the ordering period.{% endif %} Items are produced after the store closes, then delivered the way {{ store.client.name }} has arranged for this store.
+{% if store.closes_at %}The store closes on {{ store.closes_local|date:"F j, Y" }} at {{ store.closes_local|date:"g:i a T" }}.{% else %}The store will close at the end of the ordering period.{% endif %} Items are produced after the store closes, then delivered the way {{ store.client.name }} has arranged for this store.
 
 View your order:
 {{ order_url }}
