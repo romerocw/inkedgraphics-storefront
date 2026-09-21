@@ -7,10 +7,17 @@ APP=$BASE/app
 PY=$BASE/venv/bin/python
 run() { sudo -u storefront "$@"; }
 
-# The tailwind step below rewrites this tracked file, which would make the next pull abort.
-echo "== reset css";   run git -C "$APP" checkout -- stores/static/stores/site.css
-echo "== pull";        run git -C "$APP" pull --ff-only
-echo "== pip";         run $BASE/venv/bin/pip install -q -r "$APP/requirements.txt"
+if [ "${DEPLOY_PULLED:-}" != 1 ]; then
+  # The tailwind step below rewrites this tracked file, which would make the next pull abort.
+  echo "== reset css";   run git -C "$APP" checkout -- stores/static/stores/site.css
+  echo "== pull";        run git -C "$APP" pull --ff-only
+  # Bash keeps running the copy of this script it started with, even if the pull just
+  # changed it. Carry on with the version that was pulled, so new steps run this deploy.
+  export DEPLOY_PULLED=1
+  exec "$APP/deploy/deploy.sh" "$@"
+fi
+
+echo "== pip";        run $BASE/venv/bin/pip install -q -r "$APP/requirements.txt"
 echo "== tailwind";    run $BASE/bin/tailwindcss -i "$APP/assets/input.css" -o "$APP/stores/static/stores/site.css" --minify
 echo "== migrate";     run $PY "$APP/manage.py" migrate --noinput
 echo "== collectstatic"; run $PY "$APP/manage.py" collectstatic --noinput | tail -1
