@@ -16,7 +16,7 @@ source ../venv/bin/activate          # prompt shows (venv) — needed in every n
 git pull                             # pick up anything pushed from elsewhere
 python manage.py runserver           # http://localhost:8000  (Ctrl-C to stop)
 ```
-Local console: http://localhost:8000/console/  (local login: charlieromero / your local password)
+Local console: http://localhost:8000/console/  (local login: charlie@bayvalleyco.com / your local password)
 
 ## Mac: Claude Code (in a second tab)
 ```bash
