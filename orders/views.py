@@ -8,6 +8,7 @@ from stores.models import Store
 
 from .cart import Cart
 from .forms import CheckoutForm
+from .links import is_valid_key
 from .models import Order, OrderItem
 
 
@@ -68,6 +69,10 @@ def checkout(request):
 
 
 def _my_order(request, order_number):
+    """The order, if this browser placed it, was sent a link to it, or is staff; else None."""
+    if is_valid_key(order_number, request.GET.get("k")) and order_number not in request.session.get("my_orders", []):
+        request.session.setdefault("my_orders", []).append(order_number)
+        request.session.modified = True
     if order_number not in request.session.get("my_orders", []) and not request.user.is_staff:
         return None
     return get_object_or_404(Order.objects.select_related("store"), order_number=order_number)

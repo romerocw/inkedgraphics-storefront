@@ -1,4 +1,4 @@
-{% block body %}{% endblock %}
+{% autoescape off %}{% block body %}{% endblock %}{% endautoescape %}
 --
 Inked Graphics Stores
 {{ site_url }}

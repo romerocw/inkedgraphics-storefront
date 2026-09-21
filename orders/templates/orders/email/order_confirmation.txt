@@ -1,0 +1,18 @@
+{% extends "console/email/base.txt" %}{% block body %}Hi {{ order.buyer_name }},
+
+Thanks for your order from {{ store.name }}. Your payment went through and your order is confirmed.
+
+Order number: {{ order.order_number }}
+{% if order.recipient_name %}Items are for: {{ order.recipient_name }}
+{% endif %}
+{% for item in items %}{{ item.quantity }} x {{ item.product_name }}{% if item.variant_label %} ({{ item.variant_label }}){% endif %} — ${{ item.line_total|floatformat:2 }}
+{% endfor %}
+Total paid: ${{ order.total|floatformat:2 }}
+
+What happens next
+{% if store.closes_at %}The store closes on {{ store.closes_at|date:"F j, Y" }}.{% else %}The store will close at the end of the ordering period.{% endif %} Items are produced after the store closes, then delivered the way {{ store.client.name }} has arranged for this store.
+
+View your order:
+{{ order_url }}
+
+Questions? Just reply to this email.{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "console/email/base.html" %}{% block body %}
+<p style="margin:0 0 12px;">Hi {{ order.buyer_name }},</p>
+<p style="margin:0 0 16px;">Thanks for your order from <strong>{{ store.name }}</strong>. Your payment went through and your order is confirmed.</p>
+<p style="margin:0 0 4px;color:#6b7280;font-size:13px;">Order number</p>
+<p style="margin:0 0 16px;font-size:18px;font-weight:700;">{{ order.order_number }}</p>
+{% if order.recipient_name %}<p style="margin:0 0 16px;">Items are for: <strong>{{ order.recipient_name }}</strong></p>{% endif %}
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:14px;">
+  <tr>
+    <th align="left" style="padding:6px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;">Item</th>
+    <th align="center" style="padding:6px 8px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;">Qty</th>
+    <th align="right" style="padding:6px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;">Price</th>
+  </tr>
+  {% for item in items %}
+  <tr>
+    <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">{{ item.product_name }}{% if item.variant_label %}<br><span style="color:#6b7280;font-size:13px;">{{ item.variant_label }}</span>{% endif %}</td>
+    <td align="center" style="padding:8px;border-bottom:1px solid #f3f4f6;">{{ item.quantity }}</td>
+    <td align="right" style="padding:8px 0;border-bottom:1px solid #f3f4f6;">${{ item.line_total|floatformat:2 }}</td>
+  </tr>
+  {% endfor %}
+  <tr>
+    <td colspan="2" style="padding:10px 0;font-weight:700;">Total paid</td>
+    <td align="right" style="padding:10px 0;font-weight:700;">${{ order.total|floatformat:2 }}</td>
+  </tr>
+</table>
+<h2 style="margin:24px 0 8px;font-size:16px;">What happens next</h2>
+<p style="margin:0 0 12px;">{% if store.closes_at %}The store closes on <strong>{{ store.closes_at|date:"F j, Y" }}</strong>.{% else %}The store will close at the end of the ordering period.{% endif %} Items are produced after the store closes, then delivered the way {{ store.client.name }} has arranged for this store.</p>
+{% include "console/email/button.html" with label="View your order" url=order_url %}
+<p style="margin:16px 0 0;color:#6b7280;font-size:13px;">Questions? Just reply to this email.</p>
+{% endblock %}

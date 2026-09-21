@@ -8,6 +8,8 @@ from django.utils import timezone
 from catalog.models import ProductVariant, StoreProduct
 from stores.models import Store
 
+from .emails import queue_order_confirmation
+
 
 class Order(models.Model):
     """One checkout by one buyer in one store."""
@@ -90,14 +92,23 @@ class OrderItem(models.Model):
         super().save(*args, **kwargs)
 
 
+@transaction.atomic
 def mark_paid(order, payment_intent=""):
-    """Idempotent: safe to call from both the success page and the webhook."""
-    if order.status == Order.Status.PENDING:
-        order.status = Order.Status.PAID
-        order.paid_at = timezone.now()
-        if payment_intent:
-            order.stripe_payment_intent = payment_intent
-        order.save(update_fields=["status", "paid_at", "stripe_payment_intent", "updated_at"])
+    """Idempotent: safe to call from both the success page and the webhook, even at once.
+
+    Only the call that actually moves the order from pending to paid queues the buyer's
+    confirmation email, so it goes out exactly once.
+    """
+    now = timezone.now()
+    changes = {"status": Order.Status.PAID, "paid_at": now, "updated_at": now}
+    if payment_intent:
+        changes["stripe_payment_intent"] = payment_intent
+    if Order.objects.filter(pk=order.pk, status=Order.Status.PENDING).update(**changes):
+        for field, value in changes.items():
+            setattr(order, field, value)
+        queue_order_confirmation(order)
+    else:
+        order.refresh_from_db(fields=["status", "paid_at", "stripe_payment_intent", "updated_at"])
     return order
 
 

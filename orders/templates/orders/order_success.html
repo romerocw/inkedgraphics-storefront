@@ -5,6 +5,7 @@
 {% if order.status == "paid" %}
   <h1 class="text-2xl font-bold">Thank you, {{ order.buyer_name }}!</h1>
   <p class="mt-2">Your order <strong>{{ order.order_number }}</strong> is confirmed and paid. Keep this number for your records.</p>
+  <p class="mt-2">A confirmation email is on its way to <strong>{{ order.buyer_email }}</strong>. If it hasn't arrived in a few minutes, check your spam folder.</p>
 {% else %}
   <h1 class="text-2xl font-bold">Payment pending</h1>
   <p class="mt-2">We haven't received confirmation for order <strong>{{ order.order_number }}</strong> yet. If you completed payment, this page will update shortly.</p>

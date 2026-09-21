@@ -1,10 +1,18 @@
+from datetime import datetime, timezone as dt_timezone
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.contrib.auth.models import AnonymousUser
+from django.core import mail
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
-from stores.factories import make_offering, make_order, make_staff, make_store
+from messaging.models import OutboxEmail
+from stores.factories import make_client, make_offering, make_order, make_product, make_staff, make_store
+from stores.models import Store
 
-from .models import Order, allowed_transitions, change_status
+from .links import order_link_key, order_url
+from .models import Order, allowed_transitions, change_status, mark_paid
 
 
 class StatusTransitionTests(TestCase):
@@ -88,3 +96,141 @@ class StatusTransitionTests(TestCase):
         order = self.order(Order.Status.PAID)
         change = change_status(order, Order.Status.SENT_TO_OPS, AnonymousUser())
         self.assertIsNone(change.changed_by)
+
+
+@override_settings(SITE_URL="https://store.example.com")
+class OrderConfirmationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        client = make_client(name="Langley High", primary_color="#1e3a8a")
+        cls.store = make_store(client=client, name="Spring Spirit Wear", closes_at=datetime(2026, 10, 3, 18, tzinfo=dt_timezone.utc))
+        cls.hoodie = make_offering(cls.store, make_product(name="Tee & Hoodie", variants=(("Navy", "L"),)), price="40.00")
+        cls.cap = make_offering(cls.store, make_product(name="Cap", variants=(("Red", "OS"),)), price="15.00")
+
+    def pending_order(self, **kwargs):
+        kwargs.setdefault("buyer_name", "Pat O'Brien")
+        kwargs.setdefault("buyer_email", "pat@example.com")
+        return make_order(self.store, status=Order.Status.PENDING, items=[(self.hoodie, 2), (self.cap, 1)], **kwargs)
+
+    def confirmations(self):
+        return OutboxEmail.objects.filter(kind="order_confirmation")
+
+    def test_marking_paid_queues_one_confirmation_to_the_buyer(self):
+        order = self.pending_order()
+        mark_paid(order, "pi_123")
+
+        order.refresh_from_db()
+        self.assertEqual((order.status, order.stripe_payment_intent), (Order.Status.PAID, "pi_123"))
+        self.assertIsNotNone(order.paid_at)
+        (email,) = self.confirmations()
+        self.assertEqual((email.to_name, email.to_email), ("Pat O'Brien", "pat@example.com"))
+        self.assertEqual(email.subject, f"Order {order.order_number} confirmed — Spring Spirit Wear")
+        self.assertEqual(email.related, order)
+        self.assertEqual(email.status, OutboxEmail.Status.QUEUED)
+        self.assertEqual(mail.outbox, [])  # queued, not sent inline
+
+    def test_marking_paid_twice_queues_only_once(self):
+        order = self.pending_order()
+        mark_paid(order)
+        mark_paid(order)
+        self.assertEqual(self.confirmations().count(), 1)
+
+    def test_a_second_caller_with_a_stale_copy_does_not_queue_again(self):
+        # The success page and the webhook each load the order; both see it pending.
+        order = self.pending_order()
+        other_copy = Order.objects.get(pk=order.pk)
+        mark_paid(order, "pi_123")
+        mark_paid(other_copy, "pi_123")
+
+        self.assertEqual(self.confirmations().count(), 1)
+        self.assertEqual(other_copy.status, Order.Status.PAID)  # refreshed, not left pending
+
+    def test_orders_that_are_not_pending_are_left_alone(self):
+        order = make_order(self.store, status=Order.Status.CANCELLED)
+        mark_paid(order)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CANCELLED)
+        self.assertFalse(self.confirmations().exists())
+
+    def test_email_lists_the_order(self):
+        order = self.pending_order(recipient_name="Sam O'Brien")
+        mark_paid(order)
+        (email,) = self.confirmations()
+
+        for body in (email.text_body, email.html_body):
+            with self.subTest(body=body[:20]):
+                self.assertIn(order.order_number, body)
+                self.assertIn("Spring Spirit Wear", body)
+                self.assertIn("Navy / L", body)
+                self.assertIn("$80.00", body)
+                self.assertIn("$15.00", body)
+                self.assertIn("$95.00", body)
+                self.assertIn("October 3, 2026", body)
+                self.assertIn("produced after the store closes", body)
+            self.assertIn(order_url(order), email.text_body)
+        self.assertIn(order_url(order), email.html_body)
+        self.assertIn("2 x Tee & Hoodie (Navy / L)", email.text_body)
+        self.assertIn("Items are for: Sam O'Brien", email.text_body)  # plain text isn't HTML-escaped
+        self.assertIn("Tee &amp; Hoodie", email.html_body)
+        self.assertIn("Sam O&#x27;Brien", email.html_body)
+
+    def test_email_uses_the_store_branding(self):
+        mark_paid(self.pending_order())
+        html = self.confirmations().get().html_body
+        self.assertIn("background:#1e3a8a", html)
+        self.assertIn("Langley High", html)
+
+        Store.objects.filter(pk=self.store.pk).update(primary_color="#228b22")
+        self.store.refresh_from_db()
+        mark_paid(self.pending_order())
+        self.assertIn("background:#228b22", self.confirmations().first().html_body)
+
+    def test_email_copes_without_recipient_or_close_date(self):
+        Store.objects.filter(pk=self.store.pk).update(closes_at=None)
+        self.store.refresh_from_db()
+        mark_paid(self.pending_order())
+        (email,) = self.confirmations()
+        self.assertNotIn("Items are for", email.text_body)
+        self.assertIn("end of the ordering period", email.text_body)
+
+    def test_email_link_opens_the_order_in_any_browser(self):
+        order = self.pending_order()
+        mark_paid(order)
+
+        url = order_url(order)
+        self.assertTrue(url.startswith(f"https://store.example.com/order/{order.order_number}/?k="))
+        path = url.removeprefix("https://store.example.com")
+        response = self.client.get(path)
+        self.assertContains(response, order.order_number)
+        # ...and the browser remembers it without the key.
+        self.assertContains(self.client.get(f"/order/{order.order_number}/"), order.order_number)
+
+    def test_bad_or_borrowed_keys_do_not_open_an_order(self):
+        order, other = self.pending_order(), self.pending_order()
+        for key in ("", "nonsense", order_link_key(other.order_number)):
+            with self.subTest(key=key):
+                response = self.client.get(f"/order/{order.order_number}/", {"k": key})
+                self.assertRedirects(response, "/cart/", fetch_redirect_response=False)
+
+    def test_thank_you_page_marks_paid_and_says_an_email_is_coming(self):
+        order = self.pending_order(stripe_checkout_session="cs_123")
+        session = self.client.session
+        session["my_orders"] = [order.order_number]
+        session.save()
+        paid = SimpleNamespace(payment_status="paid", payment_intent="pi_123")
+        with patch("orders.payments.stripe.checkout.Session.retrieve", return_value=paid):
+            response = self.client.get(f"/order/{order.order_number}/success/", {"session_id": "cs_123"})
+            self.client.get(f"/order/{order.order_number}/success/", {"session_id": "cs_123"})
+
+        self.assertContains(response, "A confirmation email is on its way to <strong>pat@example.com</strong>")
+        self.assertEqual(self.confirmations().count(), 1)
+
+    def test_webhook_delivered_twice_queues_once(self):
+        order = self.pending_order()
+        event = {"type": "checkout.session.completed", "data": {"object": {
+            "payment_status": "paid", "payment_intent": "pi_123", "metadata": {"order_number": order.order_number},
+        }}}
+        with patch("orders.payments.stripe.Webhook.construct_event", return_value=event):
+            for _ in range(2):
+                self.assertEqual(self.client.post("/stripe/webhook/", b"{}", content_type="application/json").status_code, 200)
+        self.assertEqual(self.confirmations().count(), 1)
