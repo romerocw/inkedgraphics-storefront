@@ -1,24 +1,89 @@
+import csv
+import io
 from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView
 from django.contrib.messages.views import SuccessMessageMixin
+from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db.models import Count, Max, Q, Sum
+from django.db.models.functions import Coalesce
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView, View
 
 from catalog.models import Product, StoreProduct
-from orders.models import Order
+from orders.models import Order, allowed_transitions, change_status
 from stores.models import Client, Store
 
-from .forms import AddStoreProductsForm, ClientForm, ConsolePasswordChangeForm, StoreForm, StoreProductFormSet
+from .forms import (
+    AddStoreProductsForm,
+    ClientForm,
+    ConsolePasswordChangeForm,
+    OrderFilterForm,
+    OrderStatusForm,
+    StoreForm,
+    StoreProductFormSet,
+)
 
 # The statuses that mean money actually came in.
 PAID_STATUSES = [Order.Status.PAID, Order.Status.SENT_TO_OPS, Order.Status.FULFILLED]
 PAID = Q(orders__status__in=PAID_STATUSES)
+ORDERS_PER_PAGE = 50
+
+
+def filter_orders(queryset, params):
+    """Apply the filter bar to an order queryset. Used by both order lists and the CSV."""
+    status = params.get("status") or ""
+    if status == OrderFilterForm.ALL:
+        pass
+    elif status in Order.Status.values:
+        queryset = queryset.filter(status=status)
+    else:
+        queryset = queryset.filter(status__in=PAID_STATUSES)
+
+    search = (params.get("q") or "").strip()
+    if search:
+        queryset = queryset.filter(
+            Q(order_number__icontains=search)
+            | Q(buyer_name__icontains=search)
+            | Q(buyer_email__icontains=search)
+            | Q(recipient_name__icontains=search)
+        )
+
+    store = params.get("store") or ""
+    if store.isdigit():
+        queryset = queryset.filter(store_id=store)
+
+    # Pending orders have no paid date, so sort on "whichever date we have".
+    queryset = queryset.annotate(order_date=Coalesce("paid_at", "created_at"))
+    return queryset.order_by("order_date" if params.get("sort") == "oldest" else "-order_date")
+
+
+def order_list_context(request, queryset, *, with_store, bulk_next, extra_params=None):
+    """Filter bar + sorting + pagination, shared by /console/orders/ and a store's Orders tab."""
+    params = request.GET
+    orders = filter_orders(queryset, params).select_related("store")
+    page = Paginator(orders, ORDERS_PER_PAGE).get_page(params.get("page"))
+
+    keep = {k: v for k, v in params.items() if k not in ("page", "sort") and v}
+    keep.update(extra_params or {})
+    sort = "newest" if params.get("sort") == "oldest" else "oldest"
+    return {
+        "filter_form": OrderFilterForm(params or None, with_store=with_store),
+        "page_obj": page,
+        "orders": page.object_list,
+        "show_store": with_store,
+        "bulk_next": bulk_next,
+        "sort": params.get("sort") or "newest",
+        "sort_query": urlencode({**keep, "sort": sort}),
+        "page_query": urlencode({**keep, **({"sort": params["sort"]} if params.get("sort") else {})}),
+    }
 
 
 class StaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -94,7 +159,7 @@ class StoreListView(StaffRequiredMixin, ListView):
 class StoreDetailMixin(StaffRequiredMixin):
     """Shared plumbing for the store page and the POST endpoints that render it again."""
 
-    tabs = [("summary", "Summary"), ("products", "Products")]
+    tabs = [("summary", "Summary"), ("products", "Products"), ("orders", "Orders")]
 
     def get_store(self):
         return get_object_or_404(Store.objects.select_related("client"), pk=self.kwargs["pk"])
@@ -108,6 +173,16 @@ class StoreDetailMixin(StaffRequiredMixin):
             "paid_orders": paid.count(),
             "revenue": paid.aggregate(s=Sum("total"))["s"] or 0,
         }
+        if ctx["tab"] == "orders":
+            ctx.update(
+                order_list_context(
+                    self.request,
+                    store.orders.all(),
+                    with_store=False,
+                    bulk_next=self.tab_url(store, "orders"),
+                    extra_params={"tab": "orders"},
+                )
+            )
         if ctx["tab"] == "products":
             offerings = store.offerings.select_related("product").order_by("sort_order", "pk")
             ctx["formset"] = formset if formset is not None else StoreProductFormSet(queryset=offerings)
@@ -187,3 +262,105 @@ class StoreUpdateView(StaffRequiredMixin, UpdateView):
 
     def get_success_url(self):
         return reverse("console:store_detail", args=[self.object.pk])
+
+
+CSV_COLUMNS = [
+    "order_number", "paid_at", "buyer_name", "buyer_email", "buyer_phone", "recipient_name",
+    "product_name", "variant_label", "sku", "quantity", "unit_price", "line_total", "order_total", "notes",
+]
+
+
+class StoreOrdersCSVView(StoreDetailMixin, View):
+    """One row per item, in the column order the ops system is keyed from."""
+
+    def get(self, request, pk):
+        store = self.get_store()
+        orders = filter_orders(store.orders.all(), request.GET).prefetch_related("items")
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(CSV_COLUMNS)
+        for order in orders:
+            paid_at = timezone.localtime(order.paid_at).strftime("%Y-%m-%d %H:%M") if order.paid_at else ""
+            for item in order.items.all():
+                writer.writerow([
+                    order.order_number, paid_at, order.buyer_name, order.buyer_email, order.buyer_phone,
+                    order.recipient_name, item.product_name, item.variant_label, item.sku, item.quantity,
+                    f"{item.unit_price:.2f}", f"{item.line_total:.2f}", f"{order.total:.2f}", order.notes,
+                ])
+
+        # utf-8-sig: Excel needs the BOM to read accents correctly.
+        response = HttpResponse(buffer.getvalue().encode("utf-8-sig"), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{store.slug}-orders.csv"'
+        return response
+
+
+class OrderListView(StaffRequiredMixin, TemplateView):
+    template_name = "console/order_list.html"
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx.update(
+            order_list_context(
+                self.request, Order.objects.all(), with_store=True, bulk_next=self.request.get_full_path()
+            )
+        )
+        return ctx
+
+
+class OrderDetailView(StaffRequiredMixin, DetailView):
+    template_name = "console/order_detail.html"
+    slug_field = slug_url_kwarg = "order_number"
+    queryset = Order.objects.select_related("store", "store__client").prefetch_related("items", "status_changes__changed_by")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        moves = allowed_transitions(self.object)
+        ctx.update(
+            moves=[(status, Order.Status(status).label) for status in moves if status != Order.Status.CANCELLED],
+            can_cancel=Order.Status.CANCELLED in moves,
+        )
+        return ctx
+
+
+class OrderStatusView(StaffRequiredMixin, View):
+    """One status move on one order. Amounts are never editable."""
+
+    def post(self, request, order_number):
+        order = get_object_or_404(Order, order_number=order_number)
+        form = OrderStatusForm(request.POST)
+        if form.is_valid():
+            try:
+                change_status(order, form.cleaned_data["to_status"], request.user, form.cleaned_data["note"])
+                messages.success(request, f"{order.order_number} is now {order.get_status_display().lower()}.")
+            except ValidationError as error:
+                messages.error(request, " ".join(error.messages))
+        else:
+            messages.error(request, "That status change didn't make sense — please try again.")
+        return redirect("console:order_detail", order_number=order.order_number)
+
+
+class OrdersBulkView(StaffRequiredMixin, View):
+    """Marks several paid orders as sent to production in one go."""
+
+    def post(self, request):
+        orders = Order.objects.filter(pk__in=request.POST.getlist("orders"))
+        sent, skipped = 0, 0
+        for order in orders:
+            try:
+                change_status(order, Order.Status.SENT_TO_OPS, request.user)
+                sent += 1
+            except ValidationError:
+                skipped += 1
+
+        if sent:
+            messages.success(request, f"Marked {sent} order{'' if sent == 1 else 's'} sent to production.")
+        if skipped:
+            messages.error(request, f"Left {skipped} order{'' if skipped == 1 else 's'} alone — only paid orders can be sent to production.")
+        if not orders:
+            messages.error(request, "Tick the orders you want to mark, then press the button.")
+
+        next_url = request.POST.get("next") or ""
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+            return redirect(next_url)
+        return redirect("console:orders")

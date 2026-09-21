@@ -1,0 +1,21 @@
+<form method="get" class="card mb-4 flex flex-wrap items-end gap-4">
+  {% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}
+  <div class="grow basis-64">
+    <label for="{{ filter_form.q.id_for_label }}" class="label">{{ filter_form.q.label }}</label>
+    {{ filter_form.q }}
+  </div>
+  <div class="basis-56">
+    <label for="{{ filter_form.status.id_for_label }}" class="label">{{ filter_form.status.label }}</label>
+    {{ filter_form.status }}
+  </div>
+  {% if filter_form.store %}
+  <div class="basis-56">
+    <label for="{{ filter_form.store.id_for_label }}" class="label">{{ filter_form.store.label }}</label>
+    {{ filter_form.store }}
+  </div>
+  {% endif %}
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn">Search</button>
+    <a href="?{% if tab %}tab={{ tab }}{% endif %}" class="muted hover:underline">Clear</a>
+  </div>
+</form>

@@ -18,4 +18,9 @@ urlpatterns = [
     path("stores/<int:pk>/edit/", views.StoreUpdateView.as_view(), name="store_edit"),
     path("stores/<int:pk>/products/", views.StoreProductsView.as_view(), name="store_products"),
     path("stores/<int:pk>/products/add/", views.StoreProductsAddView.as_view(), name="store_products_add"),
+    path("stores/<int:pk>/orders.csv", views.StoreOrdersCSVView.as_view(), name="store_orders_csv"),
+    path("orders/", views.OrderListView.as_view(), name="orders"),
+    path("orders/bulk/", views.OrdersBulkView.as_view(), name="orders_bulk"),
+    path("orders/<str:order_number>/", views.OrderDetailView.as_view(), name="order_detail"),
+    path("orders/<str:order_number>/status/", views.OrderStatusView.as_view(), name="order_status"),
 ]

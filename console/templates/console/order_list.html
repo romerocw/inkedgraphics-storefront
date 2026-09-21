@@ -1,0 +1,7 @@
+{% extends "console/base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<h1 class="mb-4 text-2xl font-bold">Orders</h1>
+{% include "console/_order_filters.html" %}
+{% include "console/_orders_table.html" %}
+{% endblock %}

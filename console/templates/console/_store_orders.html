@@ -1,0 +1,6 @@
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <h2 class="text-lg font-semibold">Orders in this store</h2>
+  <a href="{% url 'console:store_orders_csv' store.pk %}?{{ page_query }}" class="btn btn-secondary">Download spreadsheet (CSV)</a>
+</div>
+{% include "console/_order_filters.html" %}
+{% include "console/_orders_table.html" with empty_message="No orders in this store yet." %}

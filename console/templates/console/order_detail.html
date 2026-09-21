@@ -1,0 +1,99 @@
+{% extends "console/base.html" %}
+{% block title %}Order {{ order.order_number }}{% endblock %}
+{% block content %}
+<a href="{% url 'console:orders' %}" class="muted text-sm hover:underline">&larr; All orders</a>
+<div class="mt-1 mb-6 flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Order {{ order.order_number }}</h1>
+    <p class="muted text-sm">
+      <a href="{% url 'console:store_detail' order.store.pk %}" class="hover:underline">{{ order.store.name }}</a>
+      · {{ order.store.client.name }} · {% include "console/_order_status.html" %}
+    </p>
+  </div>
+  <div class="text-right text-sm">
+    <div class="muted">Order total</div>
+    <div class="text-2xl font-bold">${{ order.total|floatformat:2 }}</div>
+  </div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-3">
+  <div class="lg:col-span-2">
+    <table class="cart">
+      <tr><th>Item</th><th>Size / color</th><th>SKU</th><th>Qty</th><th>Each</th><th>Line total</th></tr>
+      {% for item in order.items.all %}
+      <tr>
+        <td>{{ item.product_name }}</td>
+        <td>{{ item.variant_label|default:"—" }}</td>
+        <td class="muted">{{ item.sku }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>${{ item.unit_price|floatformat:2 }}</td>
+        <td>${{ item.line_total|floatformat:2 }}</td>
+      </tr>
+      {% empty %}<tr><td colspan="6" class="muted">This order has no items.</td></tr>{% endfor %}
+      <tr class="total"><td colspan="5">Total</td><td>${{ order.total|floatformat:2 }}</td></tr>
+    </table>
+
+    {% if order.notes %}
+    <div class="card mt-6">
+      <h2 class="mb-2 text-lg font-semibold">Notes from the buyer</h2>
+      <p class="whitespace-pre-line">{{ order.notes }}</p>
+    </div>
+    {% endif %}
+
+    <div class="card mt-6">
+      <h2 class="mb-3 text-lg font-semibold">What happened to this order</h2>
+      <ul class="space-y-2 text-sm">
+        <li><span class="muted">{{ order.created_at|date:"M j, Y g:i a" }}</span> — order placed</li>
+        {% if order.paid_at %}<li><span class="muted">{{ order.paid_at|date:"M j, Y g:i a" }}</span> — paid</li>{% endif %}
+        {% for change in order.status_changes.all %}
+        <li>
+          <span class="muted">{{ change.changed_at|date:"M j, Y g:i a" }}</span> —
+          marked {{ change.get_to_status_display|lower }}
+          {% if change.changed_by %}by {{ change.changed_by.get_username }}{% endif %}
+          {% if change.note %}<div class="muted ml-2">“{{ change.note }}”</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2 class="mb-3 text-lg font-semibold">Who it's for</h2>
+      <dl class="space-y-2 text-sm">
+        <dt class="muted">Buyer</dt><dd>{{ order.buyer_name }}</dd>
+        <dt class="muted">Email</dt><dd><a href="mailto:{{ order.buyer_email }}" class="text-brand hover:underline">{{ order.buyer_email }}</a></dd>
+        <dt class="muted">Phone</dt><dd>{{ order.buyer_phone|default:"Not given" }}</dd>
+        <dt class="muted">Items are for</dt><dd>{{ order.recipient_name|default:"The buyer" }}</dd>
+        <dt class="muted">Stripe payment</dt><dd class="break-all">{{ order.stripe_payment_intent|default:"Not recorded" }}</dd>
+      </dl>
+    </div>
+
+    {% if moves or can_cancel %}
+    <div class="card mt-6">
+      <h2 class="mb-1 text-lg font-semibold">Next step</h2>
+      <p class="muted mb-3 text-sm">Amounts can't be changed here.</p>
+      {% for status, label in moves %}
+      <form method="post" action="{% url 'console:order_status' order.order_number %}" class="mb-3">{% csrf_token %}
+        <input type="hidden" name="to_status" value="{{ status }}">
+        <button type="submit" class="btn w-full">Mark {{ label|lower }}</button>
+      </form>
+      {% endfor %}
+      {% if can_cancel %}
+      <form method="post" action="{% url 'console:order_status' order.order_number %}" class="mt-4 border-t border-gray-200 pt-4">{% csrf_token %}
+        <input type="hidden" name="to_status" value="cancelled">
+        <label for="cancel-note" class="label">Why are you cancelling?</label>
+        <textarea id="cancel-note" name="note" rows="2" class="input" placeholder="e.g. buyer asked to cancel, item out of stock"></textarea>
+        <button type="submit" class="btn btn-secondary mt-3 w-full">Cancel this order</button>
+      </form>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="card mt-6">
+      <h2 class="mb-1 text-lg font-semibold">Next step</h2>
+      <p class="muted text-sm">Nothing left to do — this order is {{ order.get_status_display|lower }}.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

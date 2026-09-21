@@ -1,0 +1,44 @@
+<form method="post" action="{% url 'console:orders_bulk' %}">{% csrf_token %}
+  <input type="hidden" name="next" value="{{ bulk_next }}">
+  <table class="cart">
+    <tr>
+      <th class="w-10"><input type="checkbox" id="check-all-orders" aria-label="Select every order shown"></th>
+      <th>Order</th>
+      {% if show_store %}<th>Store</th>{% endif %}
+      <th>Buyer</th><th>For</th><th>Total</th><th>Status</th>
+      <th><a href="?{{ sort_query }}" class="hover:underline">Date {% if sort == "oldest" %}&uarr;{% else %}&darr;{% endif %}</a></th>
+    </tr>
+    {% for o in orders %}
+    <tr>
+      <td>{% if o.status == "paid" %}<input type="checkbox" name="orders" value="{{ o.pk }}" aria-label="Select {{ o.order_number }}">{% endif %}</td>
+      <td><a href="{% url 'console:order_detail' o.order_number %}" class="font-medium text-brand hover:underline">{{ o.order_number }}</a></td>
+      {% if show_store %}<td>{{ o.store.name }}</td>{% endif %}
+      <td>{{ o.buyer_name }}<br><span class="muted text-xs">{{ o.buyer_email }}</span></td>
+      <td>{{ o.recipient_name|default:"—" }}</td>
+      <td>${{ o.total|floatformat:2 }}</td>
+      <td>{% include "console/_order_status.html" with order=o %}</td>
+      <td>{{ o.paid_at|date:"M j, Y g:i a"|default:o.created_at|date:"M j, Y g:i a" }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="{% if show_store %}8{% else %}7{% endif %}" class="muted">{{ empty_message|default:"No orders match those filters." }}</td></tr>
+    {% endfor %}
+  </table>
+  {% if orders %}
+  <div class="mt-3 flex items-center gap-3">
+    <button type="submit" class="btn">Mark sent to production</button>
+    <span class="muted text-sm">Tick paid orders above, then press this once they're with production.</span>
+  </div>
+  {% endif %}
+</form>
+{% if page_obj.has_other_pages %}
+<div class="mt-4 flex items-center gap-3 text-sm">
+  {% if page_obj.has_previous %}<a href="?{{ page_query }}&page={{ page_obj.previous_page_number }}" class="text-brand hover:underline">&larr; Newer</a>{% endif %}
+  <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} · {{ page_obj.paginator.count }} order{{ page_obj.paginator.count|pluralize }}</span>
+  {% if page_obj.has_next %}<a href="?{{ page_query }}&page={{ page_obj.next_page_number }}" class="text-brand hover:underline">Older &rarr;</a>{% endif %}
+</div>
+{% endif %}
+<script>
+  document.getElementById("check-all-orders").addEventListener("change", function () {
+    document.querySelectorAll('input[type=checkbox][name="orders"]').forEach(function (box) { box.checked = this.checked; }, this);
+  });
+</script>

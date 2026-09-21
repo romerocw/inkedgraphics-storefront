@@ -3,6 +3,7 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.utils.text import slugify
 
 from catalog.models import StoreProduct
+from orders.models import Order
 from stores.models import Client, Store
 
 INPUT = "mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand focus:outline-none"
@@ -107,3 +108,30 @@ class AddStoreProductsForm(StyledFieldsMixin, forms.Form):
             if everything or self.cleaned_data.get(f"add_{product.pk}"):
                 price = self.cleaned_data.get(f"price_{product.pk}")
                 yield product, product.default_price if price is None else price
+
+
+class OrderFilterForm(StyledFieldsMixin, forms.Form):
+    """The filter bar above an order list. Everything is optional."""
+
+    PAID_GROUP = ""
+    ALL = "all"
+    STATUS_CHOICES = [
+        (PAID_GROUP, "Paid, in production & fulfilled"),
+        (ALL, "Every status"),
+    ] + list(Order.Status.choices)
+
+    q = forms.CharField(required=False, label="Search", widget=forms.TextInput(attrs={"placeholder": "Order number, buyer or recipient"}))
+    status = forms.ChoiceField(required=False, choices=STATUS_CHOICES, label="Status")
+    store = forms.ModelChoiceField(required=False, queryset=Store.objects.select_related("client"), label="Store", empty_label="Every store")
+
+    def __init__(self, *args, with_store=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not with_store:
+            del self.fields["store"]
+
+
+class OrderStatusForm(forms.Form):
+    """One status move, checked against the rules in orders.models."""
+
+    to_status = forms.ChoiceField(choices=Order.Status.choices)
+    note = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2, "class": INPUT}))
