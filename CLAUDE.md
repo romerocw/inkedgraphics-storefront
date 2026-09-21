@@ -5,7 +5,9 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
 
 ## Layout
 - `config/` settings, urls, health-check middleware (`/health/`)
-- `stores/` Client and Store models, public store pages, base templates
+- `stores/` Client, Store, StoreStatusChange, public store pages, base templates;
+  `lifecycle.py` (the open/close schedule) + `manage.py lifecycle_tick`
+- `config/heartbeat.py` cron jobs' heartbeat files in `RUN_DIR`
 - `catalog/` Product, ProductVariant (size/color, `upcharge`), StoreProduct (per-store price)
 - `orders/` Order/OrderItem (prices snapshotted), session Cart, checkout, Stripe (`payments.py`),
   buyer emails (`emails.py`), signed order links (`links.py`)
@@ -20,13 +22,27 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   - public pages: `login/`, `forgot/` (4 reset steps), `invite/<token>/`
   - `StaffProfile` (role, phone, job title, invited_by), `permissions.py`, `invitations.py`, `mail.py`
 - `assets/input.css` Tailwind v4 source -> built to `stores/static/stores/site.css`
-- `deploy/` `uwsgi.ini`, `deploy.sh`, `cron.d/storefront`, `logrotate.d/storefront`
+- `deploy/` `uwsgi.ini`, `deploy.sh`, `cron.d/storefront`, `logrotate.d/storefront`,
+  `cloudwatch-agent.json`, `MONITORING.md` (CloudWatch setup and the lifecycle alarm)
 
 ## Conventions
 - Settings read `../.env` (one level above manage.py); never commit `.env`.
 - Local dev: `DB_ENGINE=sqlite`, `DEBUG=1`, local media. Prod: MariaDB, S3 media, Stripe keys.
 - Cart holds one store at a time. Order totals come from `Order.recalculate()`.
 - `Store.primary_color` overrides `Client.primary_color`; blank = inherit.
+- **Time zones.** `TIME_ZONE` is `America/New_York` (was UTC until migration
+  `stores/0005`, which re-read existing store times as Eastern wall-clock). Each store has a
+  `time_zone`: its open/close times are typed in the store form and shown everywhere
+  (console, buyer page, emails) in that zone, labelled, via `store.opens_local` /
+  `store.closes_local`. Never render `store.opens_at`/`closes_at` directly — the template
+  would convert them to Eastern. Everything else (orders, logs) shows in Eastern. Staff work
+  across zones, so always label times.
+- **Store lifecycle.** `lifecycle_tick` (cron, every 5 minutes) opens scheduled stores at
+  `opens_at` and closes open ones at `closes_at` (straight to closed if both passed); drafts,
+  closed stores and missing dates are never touched. Every status move — schedule or staff —
+  is a `StoreStatusChange`; the console store form logs manual ones. A staff change at or
+  after the scheduled moment wins (stores get reopened); a new date re-arms the schedule.
+  Its summary line prints every run: CloudWatch alarms if it stops (`deploy/MONITORING.md`).
 - Staff never use `/django-admin/`; anything staff need goes in `console/`.
 - Static files use ManifestStaticFilesStorage when `DEBUG` is off (plain storage in dev/tests,
   which have no manifest): after template/CSS changes, rebuild Tailwind and run collectstatic
@@ -94,13 +110,20 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
 - Rebuild CSS: `../bin/tailwindcss -i assets/input.css -o stores/static/stores/site.css --minify`
 - Deploy (on server, as root): `/srv/storefront/app/deploy/deploy.sh`
 - Send queued email now: `python manage.py send_outbox` (cron does this every minute)
+- Apply the store schedule now: `python manage.py lifecycle_tick` (cron: every 5 minutes)
 
 ## Cron
 - Scheduled jobs live in `deploy/cron.d/storefront`; log rotation in `deploy/logrotate.d/storefront`.
   `deploy.sh` installs both to `/etc/cron.d/` and `/etc/logrotate.d/` (root-owned, 644) on every
   deploy, so edit them in the repo, never on the server. Jobs run as `storefront` via the venv,
   wrapped in `flock -n`, logging to `/srv/storefront/logs/cron-<job>.log`.
+- Jobs: `send_outbox` every minute, `lifecycle_tick` every 5 minutes. Each prints one summary
+  line per run and then touches `RUN_DIR/<job>.heartbeat` (`/srv/storefront/run/`); the
+  dashboard's System box (owners/managers) reads those. Tests that run the commands use
+  `TempRunDirMixin` from `stores/factories.py`.
+- `deploy.sh` also installs `deploy/cloudwatch-agent.json` (logs -> `/storefront/prod`, 30 days)
+  and re-applies it only when it changed; the alarm itself is set up by hand per `MONITORING.md`.
 
 ## Not yet built
-Store lifecycle cron, 2FA, buyer accounts,
+2FA, buyer accounts,
 order hand-off API to the ops system (separate business — never share DB/S3).
