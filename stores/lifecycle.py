@@ -90,3 +90,25 @@ def tick(now=None):
         opened += moved_to == Store.Status.OPEN
         closed += moved_to == Store.Status.CLOSED
     return opened, closed, checked
+
+
+def schedule_notes(store, now=None):
+    """What the schedule will do to this store, for the console.
+
+    A list of {"verb": "open"|"close", "at": time in the store's zone, "state": ...}, where
+    state is "upcoming", "due" (the next run will do it) or "held" (staff overrode it).
+    """
+    now = now or timezone.now()
+    events = []
+    if store.status == Store.Status.SCHEDULED and store.opens_at:
+        events.append(("open", store.opens_at, store.opens_local))
+    if store.status in (Store.Status.SCHEDULED, Store.Status.OPEN) and store.closes_at:
+        events.append(("close", store.closes_at, store.closes_local))
+    notes = []
+    for verb, moment, local in events:
+        if moment > now:
+            state = "upcoming"
+        else:
+            state = "held" if store.pk and staff_overrode(store, moment) else "due"
+        notes.append({"verb": verb, "at": local, "state": state})
+    return notes

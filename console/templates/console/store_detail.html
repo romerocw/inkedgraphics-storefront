@@ -6,6 +6,7 @@
   <div>
     <h1 class="text-2xl font-bold">{{ store.name }}</h1>
     <p class="muted text-sm">{{ store.client.name }} · {% include "console/_store_status.html" %}</p>
+    {% include "console/_store_schedule.html" %}
   </div>
   <div class="flex items-center gap-4">
     <a href="{% url 'store_detail' store.slug %}" target="_blank" class="muted text-sm hover:underline">View public store &nearr;</a>

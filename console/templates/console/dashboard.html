@@ -8,6 +8,23 @@
   <div class="card"><div class="muted text-sm">Paid orders (7 days / all)</div><div class="text-3xl font-bold">{{ orders_week }} <span class="muted text-lg">/ {{ orders_total }}</span></div></div>
   <div class="card"><div class="muted text-sm">Revenue (7 days / all)</div><div class="text-3xl font-bold">${{ revenue_week|floatformat:2 }} <span class="muted text-lg">/ ${{ revenue_total|floatformat:2 }}</span></div></div>
 </div>
+{% if system %}
+<div class="card mt-6">
+  <h2 class="mb-3 text-lg font-semibold">System</h2>
+  <div class="grid gap-3 sm:grid-cols-3">
+    {% for job in system.jobs %}
+    <div class="rounded-md px-3 py-2 {% if job.stale %}bg-red-50 text-red-700{% else %}bg-green-50 text-green-800{% endif %}">
+      <div class="text-sm font-semibold">{{ job.label }} <span class="font-normal">({{ job.name }}, {{ job.cadence }})</span></div>
+      <div class="text-sm">{% if job.last %}Last ran {{ job.last|timesince }} ago{% else %}Has never run on this server{% endif %}{% if job.stale %} — check cron{% endif %}</div>
+    </div>
+    {% endfor %}
+    <div class="rounded-md px-3 py-2 {% if system.emails_given_up %}bg-red-50 text-red-700{% else %}bg-green-50 text-green-800{% endif %}">
+      <div class="text-sm font-semibold">Email queue</div>
+      <div class="text-sm">{{ system.emails_waiting }} waiting · <a href="{% url 'console:emails' %}?status=failed" class="underline">{{ system.emails_given_up }} gave up</a></div>
+    </div>
+  </div>
+</div>
+{% endif %}
 <div class="mt-8 grid gap-6 lg:grid-cols-2">
   <div>
     <h2 class="mb-2 text-lg font-semibold">Recent paid orders</h2>

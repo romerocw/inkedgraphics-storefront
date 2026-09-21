@@ -1,0 +1,7 @@
+{% for note in schedule %}
+<p class="mt-1 text-sm {% if note.state == 'held' %}text-yellow-800{% else %}muted{% endif %}">
+  {% if note.state == "upcoming" %}{{ note.verb|capfirst }}s automatically on {{ note.at|date:"M j, Y, g:i a T" }}.
+  {% elif note.state == "due" %}Due to {{ note.verb }} {{ note.at|date:"M j, g:i a T" }}; the schedule does it within 5 minutes.
+  {% else %}Was due to {{ note.verb }} {{ note.at|date:"M j, g:i a T" }}, but staff changed the status by hand. Set a new time to put it back on schedule.{% endif %}
+</p>
+{% endfor %}

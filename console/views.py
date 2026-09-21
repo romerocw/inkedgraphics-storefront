@@ -30,10 +30,11 @@ from django.views.generic import CreateView, DetailView, FormView, ListView, Tem
 
 from catalog.models import Product, StoreProduct
 from messaging.models import OutboxEmail
-from messaging.outbox import emails_about, retry
+from config import heartbeat
+from messaging.outbox import due, emails_about, retry
 from orders.emails import ORDER_CONFIRMATION, queue_order_confirmation
 from orders.models import Order, allowed_transitions, change_status
-from stores.lifecycle import record_manual_change
+from stores.lifecycle import record_manual_change, schedule_notes
 from stores.models import Client, Store
 
 from .invitations import InvitationInvalid, send_invitation, user_from_token
@@ -213,7 +214,31 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             recent_orders=paid.select_related("store")[:10],
             closing_soon=Store.objects.filter(status=Store.Status.OPEN, closes_at__lte=timezone.now() + timedelta(days=7)).select_related("client")[:10],
         )
+        if can_manage_team(self.request.user):
+            ctx["system"] = system_status()
         return ctx
+
+
+# A cron job that hasn't beaten for this long is shown in red on the dashboard.
+STALE_AFTER = timedelta(minutes=15)
+CRON_JOBS = [
+    ("lifecycle_tick", "Store schedule", "every 5 minutes"),
+    ("send_outbox", "Email sending", "every minute"),
+]
+
+
+def system_status():
+    """When each cron job last ran (from its heartbeat file), plus the email backlog."""
+    now = timezone.now()
+    jobs = []
+    for name, label, cadence in CRON_JOBS:
+        last = heartbeat.last_beat(name)
+        jobs.append({"name": name, "label": label, "cadence": cadence, "last": last, "stale": last is None or now - last > STALE_AFTER})
+    return {
+        "jobs": jobs,
+        "emails_waiting": due().count(),
+        "emails_given_up": OutboxEmail.objects.filter(status=OutboxEmail.Status.FAILED, next_attempt_at=None).count(),
+    }
 
 
 class ClientListView(StaffRequiredMixin, ListView):
@@ -255,6 +280,7 @@ class StoreDetailMixin(StaffRequiredMixin):
         paid = store.orders.filter(status__in=PAID_STATUSES)
         ctx = {
             "store": store,
+            "schedule": schedule_notes(store),
             "tab": tab if tab in dict(self.tabs) else "summary",
             "tabs": self.tabs,
             "paid_orders": paid.count(),
@@ -270,6 +296,8 @@ class StoreDetailMixin(StaffRequiredMixin):
                     extra_params={"tab": "orders"},
                 )
             )
+        if ctx["tab"] == "summary":
+            ctx["status_history"] = store.status_changes.select_related("changed_by").order_by("-changed_at", "-pk")[:10]
         if ctx["tab"] == "products":
             offerings = store.offerings.select_related("product").order_by("sort_order", "pk")
             ctx["formset"] = formset if formset is not None else StoreProductFormSet(queryset=offerings)

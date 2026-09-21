@@ -17,3 +17,15 @@
   </dl>
   <div class="mt-5"><a href="{% url 'console:store_edit' store.pk %}" class="btn">Edit store</a></div>
 </div>
+<div class="card mt-6 max-w-2xl">
+  <h2 class="mb-3 text-lg font-semibold">Status history</h2>
+  <ul class="space-y-2 text-sm">
+    {% for change in status_history %}
+    <li>
+      <span class="muted">{{ change.changed_at|date:"M j, Y g:i a T" }}</span> —
+      {% if change.from_status %}{{ change.get_from_status_display }} &rarr; {% else %}created as {% endif %}{{ change.get_to_status_display|lower }},
+      {% if change.changed_by %}by {{ change.changed_by.get_full_name|default:change.changed_by.email }}{% else %}on schedule{% endif %}
+    </li>
+    {% empty %}<li class="muted">No status changes recorded yet.</li>{% endfor %}
+  </ul>
+</div>
