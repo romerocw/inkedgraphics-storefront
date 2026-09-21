@@ -1,0 +1,52 @@
+{% extends "console/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<a href="{% url 'console:team' %}" class="muted text-sm hover:underline">&larr; Team</a>
+<h1 class="mt-1 mb-1 text-2xl font-bold">{{ title }}</h1>
+{% if member %}
+<p class="muted mb-4 text-sm">Signs in as <strong>{{ member.get_username }}</strong> · {{ profile.status_label }}{% if profile.invited_by %} · invited by {{ profile.invited_by.get_username }}{% endif %}</p>
+{% else %}
+<p class="muted mb-4 text-sm">We'll email them a link to set their own password. It works for 3 days.</p>
+{% endif %}
+<div class="grid gap-6 lg:grid-cols-3">
+  <form method="post" class="card lg:col-span-2">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
+    {% for field in form %}
+    <div class="mb-4">
+      <label for="{{ field.id_for_label }}" class="label">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="muted mt-1 text-xs">{{ field.help_text }}</p>{% endif %}
+      {% for e in field.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
+    </div>
+    {% endfor %}
+    <div class="mt-2 flex items-center gap-3">
+      <button type="submit" class="btn">{{ submit_label }}</button>
+      <a href="{% url 'console:team' %}" class="muted hover:underline">Cancel</a>
+    </div>
+  </form>
+  {% if member %}
+  <div>
+    <div class="card">
+      <h2 class="mb-2 text-lg font-semibold">Signing in</h2>
+      {% if member.is_active %}
+      <p class="muted mb-4 text-sm">Deactivating keeps everything they've done — it only stops them signing in.</p>
+      {% if can_deactivate %}
+      <form method="post" action="{% url 'console:team_member_status' member.pk %}">{% csrf_token %}
+        <input type="hidden" name="active" value="0">
+        <button type="submit" class="btn btn-secondary w-full">Deactivate this account</button>
+      </form>
+      {% else %}
+      <p class="muted text-sm">{{ deactivate_reason }}</p>
+      {% endif %}
+      {% else %}
+      <p class="muted mb-4 text-sm">{% if profile.status == "invited" %}They haven't set a password yet.{% else %}This account can't sign in at the moment.{% endif %}</p>
+      <form method="post" action="{% if profile.status == 'invited' %}{% url 'console:team_resend_invite' member.pk %}{% else %}{% url 'console:team_member_status' member.pk %}{% endif %}">{% csrf_token %}
+        <input type="hidden" name="active" value="1">
+        <button type="submit" class="btn w-full">{% if profile.status == "invited" %}Re-send invitation{% else %}Reactivate this account{% endif %}</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

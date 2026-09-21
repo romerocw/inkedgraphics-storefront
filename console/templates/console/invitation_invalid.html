@@ -1,0 +1,8 @@
+{% extends "console/base_public.html" %}
+{% block title %}Invitation can't be used{% endblock %}
+{% block card %}
+<h1 class="mb-2 text-xl font-bold">We can't use that link</h1>
+<p class="mb-4">{{ reason }}</p>
+<a href="{% url 'console:login' %}" class="btn w-full text-center">Go to sign in</a>
+<p class="mt-4 text-center text-sm"><a href="{% url 'console:password_reset' %}" class="text-brand hover:underline">Forgot your password?</a></p>
+{% endblock %}

@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from catalog.models import Product, ProductVariant
 from orders.models import Order
-from stores.factories import make_client, make_offering, make_order, make_product, make_staff, make_store
+from stores.factories import make_client, make_offering, make_order, make_owner, make_product, make_staff, make_store
 
 
 class PasswordChangeTests(TestCase):
@@ -527,6 +527,7 @@ class ConsoleAccessTests(TestCase):
     PUBLIC = {
         "login", "logout",
         "password_reset", "password_reset_sent", "password_reset_confirm", "password_reset_done",
+        "invitation_accept",  # the invitee has no account to sign in with yet
     }
 
     def setUp(self):
@@ -534,6 +535,7 @@ class ConsoleAccessTests(TestCase):
         self.order = make_order(self.store)
         self.product = make_product()
         self.shop_client = self.store.client
+        self.colleague = make_staff()
 
     def staff_urls(self):
         return {
@@ -557,6 +559,11 @@ class ConsoleAccessTests(TestCase):
             "products": [],
             "product_new": [],
             "product_edit": [self.product.pk],
+            "team": [],
+            "team_invite": [],
+            "team_member": [self.colleague.pk],
+            "team_member_status": [self.colleague.pk],
+            "team_resend_invite": [self.colleague.pk],
         }
 
     def test_every_console_page_is_in_this_test(self):
@@ -581,9 +588,14 @@ class ConsoleAccessTests(TestCase):
                 response = self.client.get(url)
                 self.assertRedirects(response, f"{reverse('console:login')}?next={url}")
 
-    def test_staff_can_reach_every_page_that_answers_a_get(self):
-        self.client.force_login(make_staff())
-        post_only = {"store_products", "store_products_add", "orders_bulk", "order_status"}
+    def test_an_owner_can_reach_every_page_that_answers_a_get(self):
+        # An owner, because the team pages are owner/manager only — the role rules
+        # themselves are covered in tests_accounts.py.
+        self.client.force_login(make_owner())
+        post_only = {
+            "store_products", "store_products_add", "orders_bulk", "order_status",
+            "team_member_status", "team_resend_invite",
+        }
         for name, args in self.staff_urls().items():
             if name in post_only:
                 continue

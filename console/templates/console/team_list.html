@@ -1,0 +1,55 @@
+{% extends "console/base.html" %}
+{% block title %}Team{% endblock %}
+{% block content %}
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Team</h1>
+    <p class="muted text-sm">Everyone who can sign in to the console.</p>
+  </div>
+  <a href="{% url 'console:team_invite' %}" class="btn">Invite someone</a>
+</div>
+<form method="get" class="card mb-4 flex flex-wrap items-end gap-4">
+  <div class="grow basis-64">
+    <label for="team-search" class="label">Search</label>
+    <input type="search" id="team-search" name="q" value="{{ search }}" placeholder="Name, username or email" class="input">
+  </div>
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn">Search</button>
+    <a href="{% url 'console:team' %}" class="muted hover:underline">Clear</a>
+  </div>
+</form>
+<table class="cart">
+  <tr><th>Name</th><th>Email</th><th>Role</th><th>Last signed in</th><th>Status</th><th></th></tr>
+  {% for p in profiles %}
+  <tr>
+    <td>
+      <a href="{% url 'console:team_member' p.user.pk %}" class="font-medium text-brand hover:underline">{{ p.display_name }}</a>
+      {% if p.user == user %}<span class="muted text-xs">(you)</span>{% endif %}
+      <br><span class="muted text-xs">{{ p.user.get_username }}{% if p.job_title %} · {{ p.job_title }}{% endif %}</span>
+    </td>
+    <td>{{ p.user.email|default:"—" }}{% if p.phone %}<br><span class="muted text-xs">{{ p.phone }}</span>{% endif %}</td>
+    <td>{{ p.get_role_display }}</td>
+    <td>{{ p.user.last_login|date:"M j, Y g:i a"|default:"Never" }}</td>
+    <td>
+      <span class="rounded px-2 py-0.5 text-xs font-semibold {% if p.status == 'active' %}bg-green-100 text-green-800{% elif p.status == 'invited' %}bg-yellow-100 text-yellow-800{% else %}bg-gray-200 text-gray-700{% endif %}">{{ p.status_label }}</span>
+    </td>
+    <td class="text-right whitespace-nowrap">
+      {% if p.status == "invited" %}
+      <form method="post" action="{% url 'console:team_resend_invite' p.user.pk %}" class="inline">{% csrf_token %}
+        <button type="submit" class="text-brand hover:underline">Re-send invitation</button>
+      </form>
+      {% elif p.status == "deactivated" %}
+      <form method="post" action="{% url 'console:team_member_status' p.user.pk %}" class="inline">{% csrf_token %}
+        <input type="hidden" name="active" value="1">
+        <button type="submit" class="text-brand hover:underline">Reactivate</button>
+      </form>
+      {% else %}
+      <a href="{% url 'console:team_member' p.user.pk %}" class="text-brand hover:underline">Edit</a>
+      {% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="muted">{% if search %}Nobody matches that search.{% else %}Only you so far. Press "Invite someone" to add a colleague.{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

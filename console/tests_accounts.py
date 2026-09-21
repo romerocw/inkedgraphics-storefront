@@ -1,10 +1,14 @@
 import re
+import time
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.html import escape
 
+from console.invitations import MAX_AGE
 from console.mail import send_console_email
 from console.models import StaffProfile, profile_for
 from console.permissions import (
@@ -302,3 +306,281 @@ class MyAccountTests(TestCase):
             {"old_password": "right-pass-5512", "new_password1": "fresh-pass-8823", "new_password2": "fresh-pass-8823"},
         )
         self.assertRedirects(response, reverse("console:my_account"))
+
+
+class TeamListTests(TestCase):
+    def setUp(self):
+        self.owner = make_owner(username="olivia", first_name="Olivia", last_name="Owner")
+        self.staffer = make_staff(username="sam", first_name="Sam", last_name="Staffer")
+
+    def test_owners_and_managers_see_the_team_and_the_nav_link(self):
+        for user in (self.owner, make_manager()):
+            with self.subTest(role=role_of(user)):
+                self.client.force_login(user)
+                response = self.client.get(reverse("console:team"))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(self.client.get(reverse("console:dashboard")), reverse("console:team"))
+
+    def test_staff_are_refused_and_never_see_the_link(self):
+        self.client.force_login(self.staffer)
+        self.assertEqual(self.client.get(reverse("console:team")).status_code, 403)
+        self.assertNotContains(self.client.get(reverse("console:dashboard")), reverse("console:team"))
+
+    def test_the_list_shows_names_roles_and_status(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("console:team"))
+        self.assertContains(response, "Olivia Owner")
+        self.assertContains(response, "Sam Staffer")
+        self.assertContains(response, "Never")  # neither has signed in during the test
+        self.assertContains(response, "Active")
+
+    def test_search_narrows_the_list(self):
+        self.client.force_login(self.owner)
+        found = self.client.get(reverse("console:team"), {"q": "sam"}).context["profiles"]
+        self.assertEqual([p.user for p in found], [self.staffer])
+
+    def test_an_empty_search_explains_itself(self):
+        self.client.force_login(self.owner)
+        self.assertContains(self.client.get(reverse("console:team"), {"q": "zzz"}), "Nobody matches that search")
+
+
+class TeamInviteTests(TestCase):
+    def setUp(self):
+        self.owner = make_owner(username="olivia")
+        self.client.force_login(self.owner)
+
+    def invite(self, **overrides):
+        data = {"first_name": "Dana", "last_name": "Whitfield", "email": "dana@inkedgraphics.com", "role": Role.STAFF, "job_title": "Production"}
+        data.update(overrides)
+        return self.client.post(reverse("console:team_invite"), data, follow=True)
+
+    def test_inviting_creates_a_switched_off_account_and_emails_a_link(self):
+        response = self.invite()
+        user = get_user_model().objects.get(email="dana@inkedgraphics.com")
+        self.assertFalse(user.is_active)
+        self.assertFalse(user.has_usable_password())
+        self.assertTrue(user.is_staff)
+        self.assertEqual(user.username, "dana")
+        profile = profile_for(user)
+        self.assertEqual((profile.role, profile.job_title, profile.invited_by), (Role.STAFF, "Production", self.owner))
+        self.assertEqual(profile.status_label, "Invited")
+
+        self.assertEqual(mail.outbox[0].to, ["dana@inkedgraphics.com"])
+        self.assertIn("/console/invite/", mail.outbox[0].body)
+        self.assertIn("dana", mail.outbox[0].body)  # their username
+        self.assertContains(response, "Invitation sent to dana@inkedgraphics.com")
+
+    def test_an_address_already_in_use_is_refused(self):
+        make_staff(email="dana@inkedgraphics.com")
+        response = self.invite()
+        self.assertContains(response, "already has an account")
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_manager_cannot_invite_an_owner(self):
+        self.client.force_login(make_manager())
+        response = self.invite(role=Role.OWNER)
+        self.assertContains(response, escape(OWNER_MAKES_OWNER))
+        self.assertFalse(get_user_model().objects.filter(email="dana@inkedgraphics.com").exists())
+
+    def test_a_manager_can_invite_staff_and_managers(self):
+        self.client.force_login(make_manager())
+        for role, email in ((Role.STAFF, "one@inkedgraphics.com"), (Role.MANAGER, "two@inkedgraphics.com")):
+            with self.subTest(role=role):
+                self.invite(role=role, email=email)
+                self.assertEqual(profile_for(get_user_model().objects.get(email=email)).role, role)
+
+    def test_staff_cannot_reach_the_invite_page(self):
+        self.client.force_login(make_staff())
+        self.assertEqual(self.client.get(reverse("console:team_invite")).status_code, 403)
+        self.assertEqual(self.client.post(reverse("console:team_invite")).status_code, 403)
+
+    def test_usernames_do_not_collide(self):
+        make_staff(username="dana")
+        self.invite()
+        self.assertEqual(get_user_model().objects.get(email="dana@inkedgraphics.com").username, "dana2")
+
+
+class TeamMemberTests(TestCase):
+    def setUp(self):
+        self.owner = make_owner(username="olivia")
+        self.second_owner = make_owner(username="oscar")
+        self.manager = make_manager(username="maria")
+        self.staffer = make_staff(username="sam", first_name="Sam", email="sam@inkedgraphics.com")
+
+    def edit(self, member, **overrides):
+        data = {"first_name": "Sam", "last_name": "Staffer", "email": member.email, "role": profile_for(member).role, "job_title": ""}
+        data.update(overrides)
+        return self.client.post(reverse("console:team_member", args=[member.pk]), data, follow=True)
+
+    def set_active(self, member, active):
+        return self.client.post(
+            reverse("console:team_member_status", args=[member.pk]), {"active": "1" if active else "0"}, follow=True
+        )
+
+    def test_an_owner_can_edit_details_and_role(self):
+        self.client.force_login(self.owner)
+        response = self.edit(self.staffer, last_name="Staffer", role=Role.MANAGER, job_title="Production lead")
+        self.staffer.refresh_from_db()
+        self.assertEqual(self.staffer.last_name, "Staffer")
+        self.assertEqual(profile_for(self.staffer).role, Role.MANAGER)
+        self.assertEqual(profile_for(self.staffer).job_title, "Production lead")
+        self.assertContains(response, "Saved Sam Staffer")
+
+    def test_a_manager_cannot_open_or_change_an_owner(self):
+        self.client.force_login(self.manager)
+        opened = self.client.get(reverse("console:team_member", args=[self.owner.pk]), follow=True)
+        self.assertRedirects(opened, reverse("console:team"))
+        self.assertContains(opened, escape(OWNER_ONLY))
+
+        self.edit(self.owner, first_name="Renamed")
+        self.owner.refresh_from_db()
+        self.assertNotEqual(self.owner.first_name, "Renamed")
+
+    def test_a_manager_cannot_promote_someone_to_owner(self):
+        self.client.force_login(self.manager)
+        response = self.edit(self.staffer, role=Role.OWNER)
+        self.assertEqual(profile_for(self.staffer).role, Role.STAFF)
+        self.assertContains(response, escape(OWNER_MAKES_OWNER))
+
+    def test_staff_cannot_reach_the_member_pages(self):
+        self.client.force_login(self.staffer)
+        for name in ("team_member", "team_member_status", "team_resend_invite"):
+            with self.subTest(page=name):
+                url = reverse(f"console:{name}", args=[self.owner.pk])
+                self.assertEqual(self.client.get(url).status_code, 403)
+                self.assertEqual(self.client.post(url).status_code, 403)
+
+    def test_deactivating_stops_sign_in_but_keeps_the_account(self):
+        self.client.force_login(self.owner)
+        response = self.set_active(self.staffer, False)
+        self.staffer.refresh_from_db()
+        self.assertFalse(self.staffer.is_active)
+        self.assertTrue(get_user_model().objects.filter(pk=self.staffer.pk).exists())
+        self.assertEqual(profile_for(self.staffer).status_label, "Deactivated")
+        self.assertContains(response, "can no longer sign in")
+
+        back = self.set_active(self.staffer, True)
+        self.staffer.refresh_from_db()
+        self.assertTrue(self.staffer.is_active)
+        self.assertContains(back, "can sign in again")
+
+    def test_nobody_deactivates_themselves(self):
+        self.client.force_login(self.owner)
+        response = self.set_active(self.owner, False)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.is_active)
+        self.assertContains(response, escape(NOT_YOURSELF))
+
+    def test_a_manager_cannot_deactivate_an_owner(self):
+        self.client.force_login(self.manager)
+        response = self.set_active(self.owner, False)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.is_active)
+        self.assertContains(response, escape(OWNER_ONLY))
+
+    def test_the_last_active_owner_cannot_be_demoted_or_switched_off(self):
+        self.second_owner.is_active = False
+        self.second_owner.save(update_fields=["is_active"])
+        self.client.force_login(self.owner)
+
+        demoted = self.edit(self.owner, first_name="Olivia", email=self.owner.email, role=Role.MANAGER)
+        self.assertEqual(profile_for(self.owner).role, Role.OWNER)
+        self.assertContains(demoted, escape(KEEP_AN_OWNER))
+
+        # A second owner exists again, so now it's allowed.
+        self.set_active(self.second_owner, True)
+        self.edit(self.owner, first_name="Olivia", email=self.owner.email, role=Role.MANAGER)
+        self.assertEqual(profile_for(self.owner).role, Role.MANAGER)
+
+    def test_an_email_another_account_uses_is_refused(self):
+        self.client.force_login(self.owner)
+        response = self.edit(self.staffer, email=self.manager.email)
+        self.staffer.refresh_from_db()
+        self.assertEqual(self.staffer.email, "sam@inkedgraphics.com")
+        self.assertContains(response, "already uses that email")
+
+    def test_the_page_hides_deactivation_when_it_is_not_allowed(self):
+        self.client.force_login(self.owner)
+        own_page = self.client.get(reverse("console:team_member", args=[self.owner.pk]))
+        self.assertFalse(own_page.context["can_deactivate"])
+        self.assertContains(own_page, escape(NOT_YOURSELF))
+
+        others = self.client.get(reverse("console:team_member", args=[self.staffer.pk]))
+        self.assertTrue(others.context["can_deactivate"])
+        self.assertContains(others, "Deactivate this account")
+
+
+class InvitationLifecycleTests(TestCase):
+    def setUp(self):
+        self.owner = make_owner(username="olivia", first_name="Olivia")
+        self.client.force_login(self.owner)
+        self.client.post(
+            reverse("console:team_invite"),
+            {"first_name": "Dana", "last_name": "Whitfield", "email": "dana@inkedgraphics.com", "role": Role.STAFF, "job_title": ""},
+        )
+        self.invited = get_user_model().objects.get(email="dana@inkedgraphics.com")
+        self.link = re.search(r"https?://[^\s]+/console/invite/[^\s]+", mail.outbox[0].body).group(0)
+        self.path = self.link.split("testserver", 1)[1]
+        self.client.logout()
+
+    def accept(self, path=None, password="chosen-pass-4417"):
+        return self.client.post(path or self.path, {"new_password1": password, "new_password2": password}, follow=True)
+
+    def test_accepting_sets_the_password_switches_the_account_on_and_signs_them_in(self):
+        page = self.client.get(self.path)
+        self.assertContains(page, "Set your password")
+        self.assertContains(page, "dana")
+
+        response = self.accept()
+        self.invited.refresh_from_db()
+        self.assertTrue(self.invited.is_active)
+        self.assertTrue(self.invited.check_password("chosen-pass-4417"))
+        self.assertRedirects(response, reverse("console:dashboard"))
+        self.assertContains(response, "Welcome to Inked Graphics, Dana Whitfield")
+        self.assertEqual(int(self.client.session["_auth_user_id"]), self.invited.pk)
+
+    def test_a_used_link_cannot_be_used_again(self):
+        self.accept()
+        self.client.logout()
+        again = self.client.get(self.path)
+        self.assertEqual(again.status_code, 400)
+        self.assertContains(again, "already been used", status_code=400)
+        self.assertContains(again, reverse("console:password_reset"), status_code=400)
+
+    def test_an_expired_link_says_so_and_offers_a_way_back(self):
+        later = time.time() + MAX_AGE + 60
+        with patch("django.core.signing.time.time", return_value=later):
+            response = self.client.get(self.path)
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "expired", status_code=400)
+
+    def test_a_link_inside_three_days_still_works(self):
+        with patch("django.core.signing.time.time", return_value=time.time() + MAX_AGE - 60):
+            self.assertEqual(self.client.get(self.path).status_code, 200)
+
+    def test_a_tampered_link_is_refused(self):
+        response = self.client.get(reverse("console:invitation_accept", args=["1:abc:nonsense"]))
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, escape("doesn't look right"), status_code=400)
+
+    def test_resending_gives_a_fresh_working_link(self):
+        self.client.force_login(self.owner)
+        mail.outbox.clear()
+        response = self.client.post(reverse("console:team_resend_invite", args=[self.invited.pk]), follow=True)
+        self.assertContains(response, "New invitation sent to dana@inkedgraphics.com")
+
+        new_link = re.search(r"https?://[^\s]+/console/invite/[^\s]+", mail.outbox[0].body).group(0)
+        self.client.logout()
+        self.accept(path=new_link.split("testserver", 1)[1])
+        self.invited.refresh_from_db()
+        self.assertTrue(self.invited.is_active)
+
+    def test_resending_to_someone_already_set_up_is_refused(self):
+        self.accept()
+        self.client.logout()
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse("console:team_resend_invite", args=[self.invited.pk]), follow=True)
+        self.assertContains(response, "has already set up their account")
+
+    def test_an_invited_account_cannot_be_signed_into_yet(self):
+        self.assertFalse(self.client.login(username="dana", password="chosen-pass-4417"))

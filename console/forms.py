@@ -8,7 +8,8 @@ from catalog.models import Product, ProductVariant, StoreProduct
 from orders.models import Order
 from stores.models import Client, Store
 
-from .models import profile_for
+from .models import StaffProfile, profile_for
+from .permissions import can_change_role, can_invite
 
 INPUT = "mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand focus:outline-none"
 
@@ -264,4 +265,102 @@ class MyAccountForm(StyledFieldsMixin, forms.ModelForm):
         profile = profile_for(user)
         profile.phone = self.cleaned_data["phone"]
         profile.save(update_fields=["phone"])
+        return user
+
+
+def unique_username(email):
+    """Sign-in name from the email's first part: dana@… -> dana, then dana2, dana3…"""
+    base = slugify(email.split("@")[0].replace(".", "-")) or "staff"
+    users = get_user_model()._default_manager
+    username, n = base, 2
+    while users.filter(username=username).exists():
+        username, n = f"{base}{n}", n + 1
+    return username
+
+
+class TeamInviteForm(StyledFieldsMixin, forms.Form):
+    """Invite a colleague. Creates the account switched off until they set a password."""
+
+    first_name = forms.CharField(max_length=150, label="First name")
+    last_name = forms.CharField(max_length=150, required=False, label="Last name")
+    email = forms.EmailField(label="Email address", help_text="Where we'll send the invitation.")
+    role = forms.ChoiceField(choices=StaffProfile.Role.choices, initial=StaffProfile.Role.STAFF, label="Role")
+    job_title = forms.CharField(max_length=100, required=False, label="Job title")
+
+    def __init__(self, *args, actor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.actor = actor
+
+    def clean_email(self):
+        email = self.cleaned_data["email"]
+        if get_user_model()._default_manager.filter(email__iexact=email).exists():
+            raise ValidationError("Someone with that email address already has an account.")
+        return email
+
+    def clean_role(self):
+        role = self.cleaned_data["role"]
+        allowed, reason = can_invite(self.actor, role)
+        if not allowed:
+            raise ValidationError(reason)
+        return role
+
+    def save(self):
+        """Create the switched-off account. The caller emails the invitation."""
+        user = get_user_model()._default_manager.create_user(
+            unique_username(self.cleaned_data["email"]),
+            email=self.cleaned_data["email"],
+            first_name=self.cleaned_data["first_name"],
+            last_name=self.cleaned_data["last_name"],
+            is_staff=True,
+            is_active=False,
+        )
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        profile = profile_for(user)
+        profile.role = self.cleaned_data["role"]
+        profile.job_title = self.cleaned_data["job_title"]
+        profile.invited_by = self.actor
+        profile.save(update_fields=["role", "job_title", "invited_by"])
+        return user
+
+
+class TeamMemberForm(StyledFieldsMixin, forms.ModelForm):
+    """Edit a colleague's details and role."""
+
+    role = forms.ChoiceField(choices=StaffProfile.Role.choices, label="Role")
+    job_title = forms.CharField(max_length=100, required=False, label="Job title")
+
+    class Meta:
+        model = get_user_model()
+        fields = ["first_name", "last_name", "email"]
+        labels = {"first_name": "First name", "last_name": "Last name", "email": "Email address"}
+
+    def __init__(self, *args, actor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.actor = actor
+        self.fields["email"].required = True
+        profile = profile_for(self.instance)
+        self.fields["role"].initial = profile.role
+        self.fields["job_title"].initial = profile.job_title
+
+    def clean_email(self):
+        email = self.cleaned_data["email"]
+        if get_user_model()._default_manager.filter(email__iexact=email).exclude(pk=self.instance.pk).exists():
+            raise ValidationError("Another account already uses that email address.")
+        return email
+
+    def clean_role(self):
+        role = self.cleaned_data["role"]
+        if role != profile_for(self.instance).role:
+            allowed, reason = can_change_role(self.actor, self.instance, role)
+            if not allowed:
+                raise ValidationError(reason)
+        return role
+
+    def save(self, commit=True):
+        user = super().save(commit)
+        profile = profile_for(user)
+        profile.role = self.cleaned_data["role"]
+        profile.job_title = self.cleaned_data["job_title"]
+        profile.save(update_fields=["role", "job_title"])
         return user

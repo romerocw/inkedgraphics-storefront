@@ -3,6 +3,8 @@ import io
 from datetime import timedelta
 
 from django.contrib import messages
+from django.contrib.auth import get_user_model
+from django.contrib.auth import login as sign_in
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.views import (
     LoginView,
@@ -24,14 +26,16 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
-from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView, View
+from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
 from catalog.models import Product, StoreProduct
 from orders.models import Order, allowed_transitions, change_status
 from stores.models import Client, Store
 
+from .invitations import InvitationInvalid, send_invitation, user_from_token
 from .mail import site_url
-from .models import profile_for
+from .models import StaffProfile, profile_for
+from .permissions import can_edit, can_manage_team, can_set_active
 from .forms import (
     AddStoreProductsForm,
     ClientForm,
@@ -47,6 +51,8 @@ from .forms import (
     ProductVariantFormSet,
     StoreForm,
     StoreProductFormSet,
+    TeamInviteForm,
+    TeamMemberForm,
 )
 
 # The statuses that mean money actually came in.
@@ -498,3 +504,162 @@ class ProductCreateView(ProductFormMixin, CreateView):
 
 class ProductUpdateView(ProductFormMixin, UpdateView):
     extra_context = {"title": "Edit product"}
+
+
+class TeamRequiredMixin(StaffRequiredMixin):
+    """Only owners and managers get near the team pages."""
+
+    def test_func(self):
+        return super().test_func() and can_manage_team(self.request.user)
+
+
+class TeamListView(TeamRequiredMixin, ListView):
+    template_name = "console/team_list.html"
+    context_object_name = "profiles"
+
+    def get_queryset(self):
+        profiles = StaffProfile.objects.select_related("user")
+        search = (self.request.GET.get("q") or "").strip()
+        if search:
+            profiles = profiles.filter(
+                Q(user__first_name__icontains=search)
+                | Q(user__last_name__icontains=search)
+                | Q(user__username__icontains=search)
+                | Q(user__email__icontains=search)
+            )
+        return profiles
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["search"] = (self.request.GET.get("q") or "").strip()
+        return ctx
+
+
+class TeamInviteView(TeamRequiredMixin, FormView):
+    template_name = "console/team_form.html"
+    form_class = TeamInviteForm
+    extra_context = {"title": "Invite someone", "submit_label": "Send invitation"}
+
+    def get_form_kwargs(self):
+        return {**super().get_form_kwargs(), "actor": self.request.user}
+
+    def form_valid(self, form):
+        with transaction.atomic():
+            user = form.save()
+        send_invitation(self.request, user, self.request.user)
+        messages.success(self.request, f"Invitation sent to {user.email}.")
+        return redirect("console:team")
+
+
+class TeamMemberMixin(TeamRequiredMixin):
+    """Finds the colleague being acted on, and bows out politely when they're off limits."""
+
+    def get_member(self):
+        return get_object_or_404(get_user_model().objects.select_related("staff_profile"), pk=self.kwargs["pk"], is_staff=True)
+
+    def refuse(self, reason):
+        messages.error(self.request, reason)
+        return redirect("console:team")
+
+
+class TeamMemberView(TeamMemberMixin, UpdateView):
+    template_name = "console/team_form.html"
+    form_class = TeamMemberForm
+
+    def get(self, request, *args, **kwargs):
+        allowed, reason = can_edit(request.user, self.get_member())
+        return super().get(request, *args, **kwargs) if allowed else self.refuse(reason)
+
+    def post(self, request, *args, **kwargs):
+        allowed, reason = can_edit(request.user, self.get_member())
+        return super().post(request, *args, **kwargs) if allowed else self.refuse(reason)
+
+    def get_object(self, queryset=None):
+        return self.get_member()
+
+    def get_form_kwargs(self):
+        return {**super().get_form_kwargs(), "actor": self.request.user}
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        profile = profile_for(self.object)
+        ctx.update(
+            title=profile.display_name,
+            submit_label="Save changes",
+            member=self.object,
+            profile=profile,
+            can_deactivate=can_set_active(self.request.user, self.object, False)[0],
+            deactivate_reason=can_set_active(self.request.user, self.object, False)[1],
+        )
+        return ctx
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f"Saved {profile_for(self.object).display_name}.")
+        return response
+
+    def get_success_url(self):
+        return reverse("console:team")
+
+
+class TeamMemberStatusView(TeamMemberMixin, View):
+    """Deactivate or reactivate a colleague. Accounts are never deleted."""
+
+    def post(self, request, pk):
+        member = self.get_member()
+        active = request.POST.get("active") == "1"
+        allowed, reason = can_set_active(request.user, member, active)
+        if not allowed:
+            return self.refuse(reason)
+
+        member.is_active = active
+        member.save(update_fields=["is_active"])
+        name = profile_for(member).display_name
+        messages.success(
+            request,
+            f"{name} can sign in again." if active else f"{name} can no longer sign in. Their past work is untouched.",
+        )
+        return redirect("console:team")
+
+
+class TeamResendInviteView(TeamMemberMixin, View):
+    def post(self, request, pk):
+        member = self.get_member()
+        allowed, reason = can_edit(request.user, member)
+        if not allowed:
+            return self.refuse(reason)
+        if not profile_for(member).is_invited:
+            messages.error(request, f"{profile_for(member).display_name} has already set up their account.")
+            return redirect("console:team")
+
+        send_invitation(request, member, request.user)
+        messages.success(request, f"New invitation sent to {member.email}.")
+        return redirect("console:team")
+
+
+class InvitationAcceptView(FormView):
+    """Public: the invitee sets their password, which switches the account on."""
+
+    template_name = "console/invitation_accept.html"
+    form_class = ConsoleSetPasswordForm
+
+    def dispatch(self, request, *args, **kwargs):
+        try:
+            self.invited_user = user_from_token(kwargs["token"])
+        except InvitationInvalid as problem:
+            return render(request, "console/invitation_invalid.html", {"reason": problem.message}, status=400)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        return {**super().get_form_kwargs(), "user": self.invited_user}
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(**kwargs) | {"invited_user": self.invited_user}
+
+    def form_valid(self, form):
+        user = form.save()
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+        sign_in(self.request, user, backend="django.contrib.auth.backends.ModelBackend")
+        messages.success(self.request, f"Welcome to Inked Graphics, {profile_for(user).display_name}.")
+        return redirect("console:dashboard")

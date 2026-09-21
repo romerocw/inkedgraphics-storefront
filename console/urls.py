@@ -31,4 +31,10 @@ urlpatterns = [
     path("products/", views.ProductListView.as_view(), name="products"),
     path("products/new/", views.ProductCreateView.as_view(), name="product_new"),
     path("products/<int:pk>/", views.ProductUpdateView.as_view(), name="product_edit"),
+    path("team/", views.TeamListView.as_view(), name="team"),
+    path("team/invite/", views.TeamInviteView.as_view(), name="team_invite"),
+    path("team/<int:pk>/", views.TeamMemberView.as_view(), name="team_member"),
+    path("team/<int:pk>/status/", views.TeamMemberStatusView.as_view(), name="team_member_status"),
+    path("team/<int:pk>/resend/", views.TeamResendInviteView.as_view(), name="team_resend_invite"),
+    path("invite/<str:token>/", views.InvitationAcceptView.as_view(), name="invitation_accept"),
 ]
