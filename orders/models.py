@@ -1,6 +1,9 @@
 import secrets
 
-from django.db import models
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
+from django.utils import timezone
 
 from catalog.models import ProductVariant, StoreProduct
 from stores.models import Store
@@ -89,8 +92,6 @@ class OrderItem(models.Model):
 
 def mark_paid(order, payment_intent=""):
     """Idempotent: safe to call from both the success page and the webhook."""
-    from django.utils import timezone
-
     if order.status == Order.Status.PENDING:
         order.status = Order.Status.PAID
         order.paid_at = timezone.now()
@@ -98,3 +99,66 @@ def mark_paid(order, payment_intent=""):
             order.stripe_payment_intent = payment_intent
         order.save(update_fields=["status", "paid_at", "stripe_payment_intent", "updated_at"])
     return order
+
+
+class OrderStatusChange(models.Model):
+    """One entry in an order's status history, so staff can see who changed what."""
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="status_changes")
+    from_status = models.CharField(max_length=20, choices=Order.Status.choices)
+    to_status = models.CharField(max_length=20, choices=Order.Status.choices)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="order_status_changes",
+        help_text="Staff member who made the change. Blank if the system did it.",
+    )
+    changed_at = models.DateTimeField(auto_now_add=True)
+    note = models.TextField(blank=True, help_text="Why the status changed. Required when cancelling an order.")
+
+    class Meta:
+        ordering = ["changed_at"]
+
+    def __str__(self):
+        return f"{self.order.order_number}: {self.from_status} -> {self.to_status}"
+
+
+# What staff are allowed to do next, by current status. Anything not listed here is refused:
+# a pending order becomes paid only through Stripe, and fulfilled/cancelled/refunded are final.
+ALLOWED_TRANSITIONS = {
+    Order.Status.PAID: [Order.Status.SENT_TO_OPS, Order.Status.CANCELLED],
+    Order.Status.SENT_TO_OPS: [Order.Status.FULFILLED, Order.Status.CANCELLED],
+}
+
+# Cancelling loses the customer their order, so we make staff say why.
+NOTE_REQUIRED_FOR = [Order.Status.CANCELLED]
+
+
+def allowed_transitions(order):
+    return ALLOWED_TRANSITIONS.get(order.status, [])
+
+
+@transaction.atomic
+def change_status(order, to_status, user=None, note=""):
+    """Move an order to a new status and log it. Never touches amounts.
+
+    Raises ValidationError if the move isn't allowed, or if a required note is missing.
+    """
+    note = (note or "").strip()
+    if to_status not in allowed_transitions(order):
+        raise ValidationError(
+            f"A {order.get_status_display().lower()} order can't be marked "
+            f"{Order.Status(to_status).label.lower()}."
+        )
+    if to_status in NOTE_REQUIRED_FOR and not note:
+        raise ValidationError("Please say why you're cancelling this order.")
+
+    from_status = order.status
+    order.status = to_status
+    order.save(update_fields=["status", "updated_at"])
+    return OrderStatusChange.objects.create(
+        order=order,
+        from_status=from_status,
+        to_status=to_status,
+        changed_by=user if user and user.is_authenticated else None,
+        note=note,
+    )
