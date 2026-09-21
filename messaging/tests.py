@@ -9,7 +9,8 @@ from django.db.models import QuerySet
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from stores.factories import make_order, make_store
+from config import heartbeat
+from stores.factories import TempRunDirMixin, make_order, make_store
 
 from .models import OutboxEmail
 from .outbox import BACKOFF, MAX_ATTEMPTS, claim, emails_about, enqueue, retry, send_due
@@ -67,7 +68,11 @@ def run_command(**options):
     return out.getvalue().strip()
 
 
-class SendOutboxTests(TestCase):
+class SendOutboxTests(TempRunDirMixin, TestCase):
+    def test_writes_its_heartbeat(self):
+        run_command()
+        self.assertIsNotNone(heartbeat.last_beat("send_outbox"))
+
     def test_sends_queued_email_and_prints_a_summary(self):
         (email,) = queue(to_name="Dana Ruiz", to_email="dana@example.com")
 

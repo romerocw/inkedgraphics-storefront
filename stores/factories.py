@@ -1,9 +1,12 @@
 """Builders used by the test suite. Keeps test setup short and consistent across apps."""
 
 import itertools
+import tempfile
 from decimal import Decimal
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 
 from catalog.models import Product, ProductVariant, StoreProduct
@@ -86,3 +89,14 @@ def make_order(store, status=Order.Status.PAID, items=(), **kwargs):
     if items:
         order.recalculate()
     return order
+
+
+class TempRunDirMixin:
+    """For tests that run cron commands: heartbeat files go to a throwaway RUN_DIR."""
+
+    def setUp(self):
+        super().setUp()
+        run_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(run_dir.cleanup)
+        self.run_dir = Path(run_dir.name)
+        self.enterContext(override_settings(RUN_DIR=run_dir.name))

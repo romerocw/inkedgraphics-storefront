@@ -196,6 +196,9 @@ else:
 
 # Email. Real SMTP once the server has credentials; until then nothing is silently dropped —
 # dev prints to the console, production writes files under ../logs/emails/.
+# Where cron jobs leave their heartbeat files (and flock their lock files, see deploy/cron.d).
+RUN_DIR = os.environ.get("RUN_DIR") or str(BASE_DIR.parent / "run")
+
 # Base URL for links in email sent outside a web request (the outbox runs from cron).
 SITE_URL = os.environ.get("SITE_URL", "http://localhost:8000" if DEBUG else "https://store.inkedgraphics.com").rstrip("/")
 
