@@ -3,7 +3,6 @@ from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 
 from .models import Store
-from .services import share_kit
 
 
 def index(request):
@@ -41,6 +40,5 @@ def store_detail(request, slug):
         {
             "store": store, "brand": store.client, "offerings": offerings,
             "is_open": store.status == Store.Status.OPEN, "now": timezone.now(),
-            "share_text": share_kit.share_text(store),
         },
     )

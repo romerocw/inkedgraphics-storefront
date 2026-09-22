@@ -14,7 +14,7 @@ close on time.
 | `uwsgi.log` | the Django app |
 | `httpd-error.log` | Apache errors |
 | `cron-send_outbox.log` | one line a minute: `send_outbox: sent=0 failed=0 remaining=0` |
-| `cron-lifecycle_tick.log` | one line every 5 minutes: `lifecycle_tick: opened=0 closed=0 checked=12` |
+| `cron-lifecycle_tick.log` | one line every 5 minutes: `lifecycle_tick: opened=0 closed=0 checked=12 kits_built=0 kits_failed=0` |
 
 `deploy.sh` installs the config as
 `/opt/aws/amazon-cloudwatch-agent/etc/storefront-cloudwatch-agent.json` and applies it
