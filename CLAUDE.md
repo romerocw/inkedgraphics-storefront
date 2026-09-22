@@ -43,6 +43,18 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   is a `StoreStatusChange`; the console store form logs manual ones. A staff change at or
   after the scheduled moment wins (stores get reopened); a new date re-arms the schedule.
   Its summary line prints every run: CloudWatch alarms if it stops (`deploy/MONITORING.md`).
+- **Arrival promise.** "When will it arrive?" has one answer, computed by
+  `stores/arrival.py::estimated_arrival(store)` and never typed per store. It returns an
+  `ArrivalEstimate(earliest, latest)` whose `.label` ("October 22 – 28") is the only phrasing
+  buyers see; `store.arrival` is the template-friendly shortcut. Business days are counted from
+  the **close date** (production starts at close, not today), read on the store's own calendar,
+  skipping weekends, the eleven observed US federal holidays and `settings.BUSINESS_HOLIDAYS`.
+  A store whose close date has passed promises from today, never a date in the past.
+  `Store.production_lead_days` / `ship_days_estimate` / `arrival_buffer_days` (the range's
+  width) each override `DEFAULT_*` in settings; blank = inherit, like `primary_color`.
+  Checkout snapshots the range onto `Order.promised_arrival_earliest`/`_latest` the way line
+  prices are snapshotted — the confirmation email leaves the outbox after the store has closed
+  and must quote what that buyer was shown, so read `order.promised_arrival`, not the store's.
 - Staff never use `/django-admin/`; anything staff need goes in `console/`.
 - Static files use ManifestStaticFilesStorage when `DEBUG` is off (plain storage in dev/tests,
   which have no manifest): after template/CSS changes, rebuild Tailwind and run collectstatic
