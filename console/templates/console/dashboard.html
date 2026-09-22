@@ -22,6 +22,16 @@
       <div class="text-sm font-semibold">Email queue</div>
       <div class="text-sm">{{ system.emails_waiting }} waiting · <a href="{% url 'console:emails' %}?status=failed" class="underline">{{ system.emails_given_up }} gave up</a></div>
     </div>
+    <div class="rounded-md px-3 py-2 {% if system.kits_failing_count %}bg-red-50 text-red-700{% else %}bg-green-50 text-green-800{% endif %}">
+      <div class="text-sm font-semibold">Share kits</div>
+      <div class="text-sm">
+        {% if system.kits_failing_count %}
+          {{ system.kits_failing_count }} open store{{ system.kits_failing_count|pluralize }} can't build one:
+          {% for s in system.kits_failing %}<a href="{% url 'console:store_detail' s.pk %}?tab=share" class="underline">{{ s.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+          {% if system.kits_failing_count > 3 %} and more{% endif %}
+        {% else %}Building normally{% endif %}
+      </div>
+    </div>
   </div>
 </div>
 {% endif %}

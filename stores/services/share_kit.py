@@ -249,6 +249,24 @@ def flyer_pdf(store):
     return buffer.getvalue()
 
 
+def try_generate(store, force=False):
+    """generate(), with any failure recorded on the store rather than raised.
+
+    Returns (built, error). The counts in a cron summary line scroll away; staff need to see
+    which store has no QR code, so the reason is kept on the store itself.
+    """
+    from stores.models import Store
+
+    try:
+        return generate(store, force=force), ""
+    except Exception as exc:
+        logger.exception("share kit failed for store %s (%s)", store.pk, store.slug)
+        reason = f"{type(exc).__name__}: {exc}"[:500]
+        # A plain UPDATE: whatever half-built state the instance is in shouldn't be saved.
+        Store.objects.filter(pk=store.pk).update(share_kit_error=reason)
+        return False, reason
+
+
 def refresh_open_stores():
     """Rebuild the kit of any open store whose printed details changed. Returns (built, failed).
 
@@ -263,11 +281,9 @@ def refresh_open_stores():
 
     built = failed = 0
     for store in Store.objects.filter(status=Store.Status.OPEN).select_related("client"):
-        try:
-            built += bool(generate(store))
-        except Exception:
-            logger.exception("share kit failed for store %s (%s)", store.pk, store.slug)
-            failed += 1
+        made, error = try_generate(store)
+        built += bool(made)
+        failed += bool(error)
     return built, failed
 
 
@@ -296,5 +312,8 @@ def generate(store, force=False):
 
     store.share_kit_fingerprint = current
     store.share_kit_generated_at = timezone.now()
-    store.save(update_fields=[*ASSET_FIELDS, "share_kit_fingerprint", "share_kit_generated_at", "updated_at"])
+    store.share_kit_error = ""  # this build worked, so whatever went wrong last time is history
+    store.save(update_fields=[
+        *ASSET_FIELDS, "share_kit_fingerprint", "share_kit_generated_at", "share_kit_error", "updated_at",
+    ])
     return True

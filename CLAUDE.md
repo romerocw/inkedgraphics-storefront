@@ -80,7 +80,10 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   stores only, because a closed store's arrival promise is recomputed from today and its
   fingerprint would drift daily. Generation failures are caught per store and counted in the
   tick's summary line, so a bad logo never looks like a dead cron. `manage.py
-  generate_share_kits [--store slug] [--force]` is the manual wrapper.
+  generate_share_kits [--store slug] [--force]` is the manual wrapper. Callers use
+  `try_generate()`, which records the reason on `Store.share_kit_error` instead of raising;
+  the dashboard's System box names the affected stores and the Share kit tab prints the
+  reason. A failed build saves no fingerprint, so the next sweep retries by itself.
   Typefaces come from the Bitstream Vera files inside reportlab — don't commit a font or rely
   on the server having one. Assets live under `stores/<slug>/share/`; regeneration deletes the
   old file first, since storage never overwrites and would otherwise pile up suffixed copies.

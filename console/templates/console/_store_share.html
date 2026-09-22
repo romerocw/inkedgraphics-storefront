@@ -12,6 +12,14 @@
   </form>
 </div>
 
+{% if store.share_kit_error %}
+<div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-800">
+  <p class="font-semibold">The last build failed.</p>
+  <p class="mt-1 text-sm">{{ store.share_kit_error }}</p>
+  <p class="mt-1 text-sm">The schedule keeps retrying every five minutes. Fix the cause — most often the client's logo — then rebuild.</p>
+</div>
+{% endif %}
+
 {% if share_stale and store.share_kit_generated_at %}
 <div class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
   The store has changed since this kit was built. The schedule will rebuild it within five minutes.

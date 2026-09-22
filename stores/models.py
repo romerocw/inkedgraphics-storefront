@@ -133,6 +133,10 @@ class Store(models.Model):
         help_text="Hash of what's printed on the share kit. Unchanged = nothing to rebuild.",
     )
     share_kit_generated_at = models.DateTimeField(null=True, blank=True)
+    share_kit_error = models.TextField(
+        blank=True,
+        help_text="Why the last share-kit build failed. Cleared by the next build that works.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

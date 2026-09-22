@@ -99,6 +99,36 @@ filter was created; within about 15 minutes of a working job it should turn *OK*
   `/etc/cron.d/storefront`. The alarm fires within about 15–20 minutes. Uncomment it (or
   just deploy, which reinstalls the file) and it returns to OK.
 
+## The second alarm: "share kits are failing" (optional)
+
+`lifecycle_tick` also rebuilds share kits, and ends its line with `kits_failed=N`. A store
+whose kit won't build has no QR code and no flyer, so nobody can scan their way in. The
+failure never stops the status job — that's deliberate, a bad logo must not look like a dead
+cron — so nothing shouts about it unless you set this up.
+
+The console shows it too: the dashboard's **System** box names the affected stores for owners
+and managers, and the store's **Share kit** tab prints the reason. This alarm is for finding
+out without looking.
+
+Same log group, same steps as above, with:
+
+- **Filter pattern:** `"kits_failed=" -"kits_failed=0"` — matches the summary line only when
+  the count isn't zero. **Test pattern** against `cron-lifecycle_tick.log`: on a healthy
+  server it should match *nothing*.
+- **Filter name:** `share-kit-failures`
+- **Metric name:** `ShareKitFailures`, namespace `Storefront`, value `1`
+- **Default value:** `0` here — unlike the heartbeat, a quiet period is genuinely good news.
+
+Then alarm on it: **Statistic** Sum, **Period** 1 hour, **Whenever ShareKitFailures is…**
+Greater than **2**, missing data **treated as good (not breaching)**. Greater than two rather
+than zero because the sweep retries every 5 minutes: one transient S3 hiccup shouldn't page
+anyone, but a store that's still failing an hour later needs a person.
+
+Name it `storefront-share-kit-failures`, description e.g. "A store's share kit has failed to
+build for an hour. Open /console/ and check the Share kit tab on the store named in the
+System box."
+
+
 ### Optional: the same for email sending
 
 Same recipe with pattern `"send_outbox:"`, metric `SendOutboxRuns`, period **5 minutes**

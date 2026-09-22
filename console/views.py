@@ -1,6 +1,5 @@
 import csv
 import io
-import logging
 from datetime import timedelta
 
 from django.contrib import messages
@@ -61,8 +60,6 @@ from .forms import (
     TeamInviteForm,
     TeamMemberForm,
 )
-
-logger = logging.getLogger(__name__)
 
 # The statuses that mean money actually came in.
 PAID_STATUSES = [Order.Status.PAID, Order.Status.SENT_TO_OPS, Order.Status.FULFILLED]
@@ -238,10 +235,15 @@ def system_status():
     for name, label, cadence in CRON_JOBS:
         last = heartbeat.last_beat(name)
         jobs.append({"name": name, "label": label, "cadence": cadence, "last": last, "stale": last is None or now - last > STALE_AFTER})
+    # An open store whose kit never built is a store nobody can scan their way into, and the
+    # count in the cron summary line scrolls away. Show the stores themselves.
+    kits_failing = Store.objects.filter(status=Store.Status.OPEN).exclude(share_kit_error="").select_related("client")
     return {
         "jobs": jobs,
         "emails_waiting": due().count(),
         "emails_given_up": OutboxEmail.objects.filter(status=OutboxEmail.Status.FAILED, next_attempt_at=None).count(),
+        "kits_failing": list(kits_failing[:3]),
+        "kits_failing_count": kits_failing.count(),
     }
 
 
@@ -373,11 +375,9 @@ class StoreShareKitView(StoreDetailMixin, View):
 
     def post(self, request, pk):
         store = self.get_store()
-        try:
-            share_kit.generate(store, force=True)
-        except Exception:
-            logger.exception("share kit failed for store %s (%s)", store.pk, store.slug)
-            messages.error(request, "That share kit couldn't be built. The error has been logged.")
+        built, error = share_kit.try_generate(store, force=True)
+        if error:
+            messages.error(request, "That share kit couldn't be built — the reason is shown below.")
         else:
             messages.success(request, "Share kit rebuilt.")
         return redirect(self.tab_url(store, "share"))

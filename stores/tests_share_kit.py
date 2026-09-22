@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from PIL import Image, ImageDraw
 
-from .factories import TempMediaMixin, make_staff, make_store
+from .factories import TempMediaMixin, make_owner, make_staff, make_store
 from .models import Store
 from .services import share_kit
 
@@ -245,3 +245,96 @@ class ShareKitConsoleTests(TempMediaMixin, TestCase):
 
     def test_an_unbuilt_store_says_so(self):
         self.assertContains(self.tab(), "Nothing built yet")
+
+
+class ShareKitFailureTests(TempMediaMixin, TestCase):
+    """A store whose kit won't build has to be findable, not just counted in a log line."""
+
+    def setUp(self):
+        super().setUp()
+        self.store = make_store(status=Store.Status.OPEN, closes_at=timezone.now() + timedelta(days=10))
+
+    def break_it(self):
+        return patch.object(share_kit, "flyer_pdf", side_effect=OSError("no disk"))
+
+    def test_the_reason_is_written_onto_the_store(self):
+        with self.break_it(), self.assertLogs("stores.services.share_kit", level="ERROR"):
+            built, error = share_kit.try_generate(self.store)
+        self.assertFalse(built)
+        self.store.refresh_from_db()
+        self.assertIn("no disk", self.store.share_kit_error)
+        self.assertFalse(self.store.has_share_kit)
+
+    def test_a_failure_is_retried_rather_than_fingerprinted_away(self):
+        with self.break_it(), self.assertLogs("stores.services.share_kit", level="ERROR"):
+            share_kit.try_generate(self.store)
+        self.store.refresh_from_db()
+        # Nothing was recorded as built, so the next sweep tries again by itself.
+        self.assertEqual(self.store.share_kit_fingerprint, "")
+        self.assertEqual(share_kit.refresh_open_stores(), (1, 0))
+
+    def test_a_later_success_clears_the_error(self):
+        with self.break_it(), self.assertLogs("stores.services.share_kit", level="ERROR"):
+            share_kit.try_generate(self.store)
+        share_kit.try_generate(self.store)
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.share_kit_error, "")
+        self.assertTrue(self.store.has_share_kit)
+
+    def test_a_half_built_store_is_not_saved(self):
+        with self.break_it(), self.assertLogs("stores.services.share_kit", level="ERROR"):
+            share_kit.try_generate(self.store)
+        self.store.refresh_from_db()
+        for field_name in share_kit.ASSET_FIELDS:
+            with self.subTest(field=field_name):
+                self.assertFalse(getattr(self.store, field_name).name)
+
+
+class ShareKitDashboardTests(TempMediaMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(make_owner())
+
+    def failing_store(self, name="Broken Store"):
+        store = make_store(name=name, status=Store.Status.OPEN, closes_at=timezone.now() + timedelta(days=10))
+        with patch.object(share_kit, "flyer_pdf", side_effect=OSError("no disk")):
+            with self.assertLogs("stores.services.share_kit", level="ERROR"):
+                share_kit.try_generate(store)
+        return store
+
+    def dashboard(self):
+        return self.client.get(reverse("console:dashboard"))
+
+    def test_a_healthy_system_says_so(self):
+        self.assertContains(self.dashboard(), "Building normally")
+
+    def test_a_failing_store_is_named_and_linked(self):
+        store = self.failing_store()
+        page = self.dashboard()
+        self.assertContains(page, "Broken Store")
+        self.assertContains(page, f"{reverse('console:store_detail', args=[store.pk])}?tab=share")
+        self.assertNotContains(page, "Building normally")
+
+    def test_a_closed_store_is_not_chased(self):
+        store = self.failing_store()
+        store.status = Store.Status.CLOSED
+        store.save(update_fields=["status"])
+        self.assertContains(self.dashboard(), "Building normally")
+
+    def test_only_the_first_few_are_named(self):
+        for n in range(4):
+            self.failing_store(name=f"Broken {n}")
+        page = self.dashboard()
+        self.assertContains(page, "4 open stores can't build one")
+        self.assertContains(page, "and more")
+
+    def test_staff_without_team_access_do_not_see_the_system_box(self):
+        self.client.force_login(make_staff())
+        self.failing_store()
+        self.assertNotContains(self.dashboard(), "Share kits")
+
+    def test_the_share_tab_shows_the_reason(self):
+        store = self.failing_store()
+        page = self.client.get(reverse("console:store_detail", args=[store.pk]), {"tab": "share"})
+        self.assertContains(page, "The last build failed")
+        self.assertContains(page, "no disk")
