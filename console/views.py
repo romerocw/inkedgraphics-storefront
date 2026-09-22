@@ -33,7 +33,7 @@ from messaging.models import OutboxEmail
 from config import heartbeat
 from messaging.outbox import due, emails_about, retry
 from orders.emails import ORDER_CONFIRMATION, queue_order_confirmation
-from orders.models import Order, allowed_transitions, change_status
+from orders.models import Order, OrderItem, allowed_transitions, change_status
 from stores.lifecycle import record_manual_change, schedule_notes
 from stores.models import Client, Store
 
@@ -268,21 +268,53 @@ class StoreListView(StaffRequiredMixin, ListView):
     )
 
 
+UNNAMED_RECIPIENT = "Not named"
+
+
+def packout_groups(store):
+    """Every paid item in the store, gathered under the person it's for, for the floor.
+
+    Orders placed before recipient labels existed have none, so they collect under one
+    "Not named" heading at the end rather than vanishing from the sort.
+    """
+    items = (
+        OrderItem.objects
+        .filter(order__store=store, order__status__in=PAID_STATUSES)
+        .select_related("order")
+        .order_by("product_name", "variant_label")
+    )
+    groups = {}
+    for item in items:
+        groups.setdefault(item.recipient_label.strip() or UNNAMED_RECIPIENT, []).append(item)
+    return [
+        {"recipient": name, "items": lines, "pieces": sum(i.quantity for i in lines)}
+        for name, lines in sorted(groups.items(), key=lambda kv: (kv[0] == UNNAMED_RECIPIENT, kv[0].lower()))
+    ]
+
+
 class StoreDetailMixin(StaffRequiredMixin):
     """Shared plumbing for the store page and the POST endpoints that render it again."""
 
-    tabs = [("summary", "Summary"), ("products", "Products"), ("orders", "Orders")]
+    BASE_TABS = [("summary", "Summary"), ("products", "Products"), ("orders", "Orders")]
+
+    def tabs_for(self, store):
+        """Only a store that arrives in one consignment needs sorting on the floor."""
+        tabs = list(self.BASE_TABS)
+        if store.is_group:
+            tabs.append(("packout", "Pack-out"))
+        return tabs
 
     def get_store(self):
         return get_object_or_404(Store.objects.select_related("client"), pk=self.kwargs["pk"])
 
     def tab_context(self, store, tab, formset=None, add_form=None):
         paid = store.orders.filter(status__in=PAID_STATUSES)
+        tabs = self.tabs_for(store)
         ctx = {
             "store": store,
             "schedule": schedule_notes(store),
-            "tab": tab if tab in dict(self.tabs) else "summary",
-            "tabs": self.tabs,
+            "tab": tab if tab in dict(tabs) else "summary",
+            "tabs": tabs,
             "paid_orders": paid.count(),
             "revenue": paid.aggregate(s=Sum("subtotal"))["s"] or 0,
         }
@@ -296,6 +328,8 @@ class StoreDetailMixin(StaffRequiredMixin):
                     extra_params={"tab": "orders"},
                 )
             )
+        if ctx["tab"] == "packout":
+            ctx["packout"] = packout_groups(store)
         if ctx["tab"] == "summary":
             ctx["status_history"] = store.status_changes.select_related("changed_by").order_by("-changed_at", "-pk")[:10]
         if ctx["tab"] == "products":
@@ -393,9 +427,11 @@ class StoreUpdateView(StaffRequiredMixin, UpdateView):
         return reverse("console:store_detail", args=[self.object.pk])
 
 
+# Staff hand-key from this, so the established columns never move: new ones go on the end.
 CSV_COLUMNS = [
     "order_number", "paid_at", "buyer_name", "buyer_email", "buyer_phone", "recipient_name",
     "product_name", "variant_label", "sku", "quantity", "unit_price", "line_total", "order_total", "notes",
+    "fulfillment_mode", "recipient_label", "delivery_fee", "delivery_location", "delivery_address",
 ]
 
 
@@ -405,6 +441,10 @@ class StoreOrdersCSVView(StoreDetailMixin, View):
     def get(self, request, pk):
         store = self.get_store()
         orders = filter_orders(store.orders.all(), request.GET).prefetch_related("items")
+
+        # Where the whole batch goes, repeated on every row: ops keys one line at a time.
+        location = store.delivery_location_name if store.is_group else ""
+        address = " / ".join(l.strip() for l in store.delivery_address.splitlines() if l.strip()) if store.is_group else ""
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -416,6 +456,7 @@ class StoreOrdersCSVView(StoreDetailMixin, View):
                     order.order_number, paid_at, order.buyer_name, order.buyer_email, order.buyer_phone,
                     order.recipient_name, item.product_name, item.variant_label, item.sku, item.quantity,
                     f"{item.unit_price:.2f}", f"{item.line_total:.2f}", f"{order.total:.2f}", order.notes,
+                    store.fulfillment_mode, item.recipient_label, f"{order.delivery_fee:.2f}", location, address,
                 ])
 
         # utf-8-sig: Excel needs the BOM to read accents correctly.

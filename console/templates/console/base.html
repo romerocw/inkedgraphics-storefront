@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{% static 'stores/site.css' %}">
 </head>
 <body class="flex min-h-full flex-col text-gray-800">
-  {% block header %}<header class="bg-gray-900 text-white">
+  {% block header %}<header class="bg-gray-900 text-white print:hidden">
     <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
       <div class="flex items-center gap-6">
         <a href="{% url 'console:dashboard' %}" class="text-lg font-bold">Inked Graphics Console</a>

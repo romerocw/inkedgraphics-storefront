@@ -82,7 +82,9 @@ class Order(models.Model):
     def recalculate(self):
         self.subtotal = sum((i.line_total for i in self.items.all()), start=0)
         self.total = self.subtotal + self.delivery_fee
-        self.save(update_fields=["subtotal", "total", "updated_at"])
+        # delivery_fee is written too, so a total can never disagree with the fee it was built
+        # from — recalculating after setting one would otherwise save only half the change.
+        self.save(update_fields=["subtotal", "delivery_fee", "total", "updated_at"])
 
 
 class OrderItem(models.Model):

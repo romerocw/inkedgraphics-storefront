@@ -1,24 +1,25 @@
 {% extends "console/base.html" %}
 {% block title %}{{ store.name }}{% endblock %}
 {% block content %}
-<a href="{% url 'console:stores' %}" class="muted text-sm hover:underline">&larr; All stores</a>
+<a href="{% url 'console:stores' %}" class="muted text-sm hover:underline print:hidden">&larr; All stores</a>
 <div class="mt-1 mb-6 flex flex-wrap items-start justify-between gap-3">
   <div>
     <h1 class="text-2xl font-bold">{{ store.name }}</h1>
     <p class="muted text-sm">{{ store.client.name }} · {% include "console/_store_status.html" %}</p>
     {% include "console/_store_schedule.html" %}
   </div>
-  <div class="flex items-center gap-4">
+  <div class="flex items-center gap-4 print:hidden">
     <a href="{% url 'store_detail' store.slug %}" target="_blank" class="muted text-sm hover:underline">View public store &nearr;</a>
     <a href="{% url 'console:store_edit' store.pk %}" class="btn">Edit store</a>
   </div>
 </div>
-<nav class="mb-6 flex gap-2 border-b border-gray-200 text-sm">
+<nav class="mb-6 flex gap-2 border-b border-gray-200 text-sm print:hidden">
   {% for key, label in tabs %}
   <a href="?tab={{ key }}" class="-mb-px border-b-2 px-3 py-2 {% if tab == key %}border-brand font-semibold text-gray-900{% else %}border-transparent muted hover:text-gray-900{% endif %}">{{ label }}</a>
   {% endfor %}
 </nav>
 {% if tab == "products" %}{% include "console/_store_products.html" %}
 {% elif tab == "orders" %}{% include "console/_store_orders.html" %}
+{% elif tab == "packout" %}{% include "console/_store_packout.html" %}
 {% else %}{% include "console/_store_summary.html" %}{% endif %}
 {% endblock %}

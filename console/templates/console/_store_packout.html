@@ -1,0 +1,35 @@
+<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="text-lg font-semibold">Pack-out list</h2>
+    <p class="muted text-sm">
+      {{ packout|length }} recipient{{ packout|length|pluralize }} ·
+      {{ store.get_fulfillment_mode_display|lower }}{% if store.delivery_location_name %} to {{ store.delivery_location_name }}{% endif %}
+    </p>
+  </div>
+  <button type="button" onclick="window.print()" class="btn print:hidden">Print</button>
+</div>
+{% for group in packout %}
+<div class="card mb-3 break-inside-avoid">
+  <div class="flex items-baseline justify-between gap-3">
+    <h3 class="font-semibold">{{ group.recipient }}</h3>
+    <span class="muted text-sm">{{ group.pieces }} piece{{ group.pieces|pluralize }}</span>
+  </div>
+  <table class="mt-2 w-full text-sm">
+    <tr class="muted text-left"><th class="font-medium">Item</th><th class="font-medium">Size</th><th class="font-medium">SKU</th><th class="font-medium">Qty</th><th class="font-medium">Order</th></tr>
+    {% for item in group.items %}
+    <tr class="border-t border-gray-100">
+      <td class="py-1">{{ item.product_name }}</td>
+      <td class="py-1">{{ item.variant_label }}</td>
+      <td class="py-1">{{ item.sku }}</td>
+      <td class="py-1">{{ item.quantity }}</td>
+      <td class="py-1">
+        <a href="{% url 'console:order_detail' item.order.order_number %}" class="text-brand hover:underline print:no-underline">{{ item.order.order_number }}</a>
+        <span class="muted">· {{ item.order.buyer_name }}</span>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% empty %}
+<p class="muted">Nothing paid for yet — the list fills up as orders come in.</p>
+{% endfor %}

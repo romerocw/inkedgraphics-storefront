@@ -8,8 +8,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from catalog.models import Product, ProductVariant
-from orders.models import Order
-from stores.factories import make_client, make_offering, make_order, make_owner, make_product, make_staff, make_store
+from orders.models import Order, OrderItem
+from stores.factories import (
+    make_client, make_group_store, make_offering, make_order, make_owner, make_product, make_staff, make_store,
+)
+from stores.models import Store
+
+from .views import packout_groups
 
 
 class PasswordChangeTests(TestCase):
@@ -318,6 +323,7 @@ class OrdersCSVTests(TestCase):
     EXPECTED_COLUMNS = [
         "order_number", "paid_at", "buyer_name", "buyer_email", "buyer_phone", "recipient_name",
         "product_name", "variant_label", "sku", "quantity", "unit_price", "line_total", "order_total", "notes",
+        "fulfillment_mode", "recipient_label", "delivery_fee", "delivery_location", "delivery_address",
     ]
 
     def setUp(self):
@@ -365,6 +371,7 @@ class OrdersCSVTests(TestCase):
                 "Dana Buyer", "dana@example.com", "703-555-0101", "Sam Player",
                 "Hoodie", "Black / M", "HOOD-BLACK-M", "2", "40.00", "80.00", "100.00",
                 "Please add a number 7",
+                "individual_ship", "", "0.00", "", "",
             ],
         )
         self.assertEqual(by_sku["TEE-BLACK-M"][9:13], ["1", "20.00", "20.00", "100.00"])
@@ -604,3 +611,122 @@ class ConsoleAccessTests(TestCase):
                 continue
             with self.subTest(page=name):
                 self.assertEqual(self.client.get(reverse(f"console:{name}", args=args)).status_code, 200)
+
+
+class PackoutListTests(TestCase):
+    """The floor's sorting sheet: every paid piece under the person it's for."""
+
+    def setUp(self):
+        self.store = make_group_store(Store.Fulfillment.GROUP_DELIVERY)
+        self.hoodie = make_offering(self.store, make_product(name="Hoodie", sku_prefix="HOOD"), price="40.00")
+        self.tee = make_offering(self.store, make_product(name="Tee", sku_prefix="TEE"), price="20.00")
+        self.client.force_login(make_staff())
+
+    def order_for(self, *labels, status=Order.Status.PAID, offering=None):
+        order = make_order(self.store, status=status)
+        for label in labels:
+            OrderItem.objects.create(
+                order=order, store_product=offering or self.hoodie,
+                variant=(offering or self.hoodie).product.variants.first(),
+                quantity=1, unit_price=Decimal("40.00"), recipient_label=label,
+            )
+        order.recalculate()
+        return order
+
+    def groups(self):
+        return packout_groups(self.store)
+
+    def test_lines_gather_under_their_recipient_across_orders(self):
+        self.order_for("Ava", "Ben")
+        self.order_for("Ava", offering=self.tee)
+        self.assertEqual([g["recipient"] for g in self.groups()], ["Ava", "Ben"])
+        self.assertEqual([g["pieces"] for g in self.groups()], [2, 1])
+
+    def test_recipients_are_listed_alphabetically_ignoring_case(self):
+        self.order_for("zoe", "Ava", "ben")
+        self.assertEqual([g["recipient"] for g in self.groups()], ["Ava", "ben", "zoe"])
+
+    def test_unlabelled_lines_collect_at_the_end_rather_than_vanishing(self):
+        self.order_for("Ava", "")
+        groups = self.groups()
+        self.assertEqual([g["recipient"] for g in groups], ["Ava", "Not named"])
+
+    def test_unpaid_orders_are_not_on_the_floor_sheet(self):
+        self.order_for("Ava", status=Order.Status.PENDING)
+        self.order_for("Ben")
+        self.assertEqual([g["recipient"] for g in self.groups()], ["Ben"])
+
+    def test_orders_already_in_production_stay_on_the_sheet(self):
+        self.order_for("Ava", status=Order.Status.SENT_TO_OPS)
+        self.assertEqual([g["recipient"] for g in self.groups()], ["Ava"])
+
+    def test_the_tab_shows_only_for_group_stores(self):
+        page = self.client.get(reverse("console:store_detail", args=[self.store.pk]))
+        self.assertContains(page, "Pack-out")
+
+        individual = make_store()
+        page = self.client.get(reverse("console:store_detail", args=[individual.pk]))
+        self.assertNotContains(page, "Pack-out")
+
+    def test_asking_for_the_packout_tab_of_an_individual_store_falls_back_to_summary(self):
+        individual = make_store()
+        page = self.client.get(reverse("console:store_detail", args=[individual.pk]), {"tab": "packout"})
+        self.assertContains(page, "Store details")
+
+    def test_the_page_lists_each_recipient_with_their_items(self):
+        self.order_for("Ava – 5th grade")
+        page = self.client.get(reverse("console:store_detail", args=[self.store.pk]), {"tab": "packout"})
+        self.assertContains(page, "Ava – 5th grade")
+        self.assertContains(page, "HOOD-BLACK-M")
+        self.assertContains(page, "window.print()")
+
+    def test_an_empty_store_says_so_rather_than_showing_a_blank_sheet(self):
+        page = self.client.get(reverse("console:store_detail", args=[self.store.pk]), {"tab": "packout"})
+        self.assertContains(page, "Nothing paid for yet")
+
+
+class GroupStoreCSVTests(TestCase):
+    """The ops hand-off carries where the batch goes and who each line is for."""
+
+    def setUp(self):
+        self.store = make_group_store(Store.Fulfillment.GROUP_SHIP, group_ship_fee="6.50")
+        self.offering = make_offering(self.store, make_product(name="Hoodie", sku_prefix="HOOD"), price="40.00")
+        self.order = make_order(self.store, buyer_name="Dana Buyer")
+        OrderItem.objects.create(
+            order=self.order, store_product=self.offering, variant=self.offering.product.variants.first(),
+            quantity=1, unit_price=Decimal("40.00"), recipient_label="Ava – 5th grade",
+        )
+        self.order.delivery_fee = Decimal("6.50")
+        self.order.recalculate()
+        self.client.force_login(make_staff())
+
+    def rows(self):
+        response = self.client.get(reverse("console:store_orders_csv", args=[self.store.pk]))
+        return list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+
+    def test_the_new_columns_are_appended_not_inserted(self):
+        header = self.rows()[0]
+        self.assertEqual(header[:14], OrdersCSVTests.EXPECTED_COLUMNS[:14])
+        self.assertEqual(
+            header[14:],
+            ["fulfillment_mode", "recipient_label", "delivery_fee", "delivery_location", "delivery_address"],
+        )
+
+    def test_each_row_carries_the_mode_recipient_and_destination(self):
+        row = self.rows()[1]
+        self.assertEqual(
+            row[14:],
+            ["group_ship", "Ava – 5th grade", "6.50",
+             "Langley High front office", "6520 Georgetown Pike / McLean, VA 22101"],
+        )
+
+    def test_the_multiline_address_stays_on_one_line(self):
+        self.assertNotIn("\n", self.rows()[1][18])
+
+    def test_an_individual_ship_store_leaves_the_destination_blank(self):
+        store = make_store()
+        offering = make_offering(store, price="40.00")
+        make_order(store, items=[(offering, 1)])
+        response = self.client.get(reverse("console:store_orders_csv", args=[store.pk]))
+        row = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))[1]
+        self.assertEqual(row[14:], ["individual_ship", "", "0.00", "", ""])
