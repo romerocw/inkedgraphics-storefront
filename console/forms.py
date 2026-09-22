@@ -70,7 +70,11 @@ class StoreForm(StyledForm):
 
     class Meta:
         model = Store
-        fields = ["client", "name", "status", "time_zone", "opens_at", "closes_at", "primary_color", "subdomain"]
+        fields = [
+            "client", "name", "status", "time_zone", "opens_at", "closes_at",
+            "production_lead_days", "ship_days_estimate", "arrival_buffer_days",
+            "primary_color", "subdomain",
+        ]
         field_classes = {"opens_at": WallClockDateTimeField, "closes_at": WallClockDateTimeField}
         widgets = {
             "opens_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
@@ -82,6 +86,9 @@ class StoreForm(StyledForm):
             "time_zone": "Store time zone",
             "opens_at": "Opens at (store time)",
             "closes_at": "Closes at (store time)",
+            "production_lead_days": "Production days (blank = site default)",
+            "ship_days_estimate": "Shipping days (blank = site default)",
+            "arrival_buffer_days": "Arrival range width (blank = site default)",
         }
 
     def __init__(self, *args, **kwargs):

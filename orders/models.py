@@ -6,6 +6,7 @@ from django.db import models, transaction
 from django.utils import timezone
 
 from catalog.models import ProductVariant, StoreProduct
+from stores.arrival import ArrivalEstimate
 from stores.models import Store
 
 from .emails import queue_order_confirmation
@@ -35,6 +36,17 @@ class Order(models.Model):
     )
     notes = models.TextField(blank=True)
 
+    # Snapshotted at checkout like the line prices: the confirmation email goes out from cron
+    # after the store closes, and must quote the dates this buyer was actually shown.
+    promised_arrival_earliest = models.DateField(
+        null=True, blank=True,
+        help_text="Start of the arrival range shown to the buyer at checkout.",
+    )
+    promised_arrival_latest = models.DateField(
+        null=True, blank=True,
+        help_text="End of the arrival range shown to the buyer at checkout.",
+    )
+
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     stripe_checkout_session = models.CharField(max_length=100, blank=True)
@@ -54,6 +66,13 @@ class Order(models.Model):
         if not self.order_number:
             self.order_number = "IG-" + secrets.token_hex(4).upper()
         super().save(*args, **kwargs)
+
+    @property
+    def promised_arrival(self):
+        """What this buyer was promised, or None for orders placed before we promised anything."""
+        if self.promised_arrival_earliest and self.promised_arrival_latest:
+            return ArrivalEstimate(self.promised_arrival_earliest, self.promised_arrival_latest)
+        return None
 
     def recalculate(self):
         self.subtotal = sum((i.line_total for i in self.items.all()), start=0)

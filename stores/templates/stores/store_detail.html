@@ -4,14 +4,16 @@
 {% block content %}
 <h1 class="text-2xl font-bold">{{ store.name }}</h1>
 {% if is_open %}
-  {% if store.closes_at %}<p class="muted mb-6">Store closes {{ store.closes_local|date:"F j, Y, g:i a T" }}.</p>{% endif %}
+  {% with arrival=store.arrival %}
+  {% if store.closes_at %}<p class="muted mb-6">Store closes {{ store.closes_local|date:"F j, Y, g:i a T" }}.{% if arrival %} Orders arrive {{ arrival.label }}.{% endif %}</p>{% endif %}
   <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
   {% for item in offerings %}
     <div class="card">
       {% if item.product.image %}<img src="{{ item.product.image.url }}" alt="" class="mb-3 aspect-square w-full rounded-md object-cover">{% endif %}
       <h2 class="text-lg font-semibold">{{ item.name }}</h2>
       {% if item.product.description %}<p class="mt-1 text-sm text-gray-600">{{ item.product.description }}</p>{% endif %}
-      <p class="my-3 text-xl font-bold">${{ item.price }}</p>
+      <p class="mt-3 text-xl font-bold">${{ item.price }}</p>
+      {% if arrival %}<p class="mb-3 text-sm text-gray-600">Arrives {{ arrival.label }}</p>{% else %}<div class="mb-3"></div>{% endif %}
       <form method="post" action="{% url 'cart_add' store.slug %}">
         {% csrf_token %}
         <input type="hidden" name="store_product" value="{{ item.id }}">
@@ -30,6 +32,7 @@
     <p class="muted">Nothing is listed in this store yet.</p>
   {% endfor %}
   </div>
+  {% endwith %}
 {% elif store.status == "scheduled" %}
   <p class="mt-4">This store opens {% if store.opens_at %}{{ store.opens_local|date:"F j, Y, g:i a T" }}{% else %}soon{% endif %}.</p>
 {% else %}

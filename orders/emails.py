@@ -22,6 +22,9 @@ def queue_order_confirmation(order):
             "store": store,
             "brand_name": client.name,
             "brand_color": store.primary_color or client.primary_color,
+            # What the buyer was told at checkout, not what the store would compute now: this
+            # email is sent from cron, often after the store has closed.
+            "arrival": order.promised_arrival,
             "order_url": order_url(order),
         },
         related=order,

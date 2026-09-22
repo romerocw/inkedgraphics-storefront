@@ -24,6 +24,7 @@
 </table>
 <h2 style="margin:24px 0 8px;font-size:16px;">What happens next</h2>
 <p style="margin:0 0 12px;">{% if store.closes_at %}The store closes on <strong>{{ store.closes_local|date:"F j, Y" }} at {{ store.closes_local|date:"g:i a T" }}</strong>.{% else %}The store will close at the end of the ordering period.{% endif %} Items are produced after the store closes, then delivered the way {{ store.client.name }} has arranged for this store.</p>
+{% if arrival %}<p style="margin:0 0 12px;">Arrives <strong>{{ arrival.label }}</strong>.</p>{% endif %}
 {% include "console/email/button.html" with label="View your order" url=order_url %}
 <p style="margin:16px 0 0;color:#6b7280;font-size:13px;">Questions? Just reply to this email.</p>
 {% endblock %}

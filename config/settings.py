@@ -245,6 +245,17 @@ else:
         }
     }
 
+# The arrival promise (stores/arrival.py). Buyers are told a date range counted in business
+# days from the store's close date: production, then transit, then how wide the range is.
+# Any store can override any of the three; blank on the store means the default here.
+DEFAULT_PRODUCTION_LEAD_DAYS = 10
+DEFAULT_SHIP_DAYS_ESTIMATE = 3
+DEFAULT_ARRIVAL_BUFFER_DAYS = 4
+
+# Days production stops, on top of the eleven US federal holidays. ISO dates, e.g.
+# "2026-11-27" for the Friday after Thanksgiving.
+BUSINESS_HOLIDAYS = []
+
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")

@@ -4,6 +4,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from catalog.models import ProductVariant, StoreProduct
+from stores.arrival import estimated_arrival
 from stores.models import Store
 
 from .cart import Cart
@@ -55,6 +56,10 @@ def checkout(request):
         with transaction.atomic():
             order = form.save(commit=False)
             order.store = store
+            # Snapshot the promise this buyer was just shown; the store's own dates move on.
+            arrival = estimated_arrival(store)
+            if arrival:
+                order.promised_arrival_earliest, order.promised_arrival_latest = arrival
             order.save()
             for i in items:
                 OrderItem.objects.create(

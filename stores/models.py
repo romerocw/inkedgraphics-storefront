@@ -74,6 +74,18 @@ class Store(models.Model):
         null=True, blank=True,
         help_text="When an open store closes by itself, in the store's time zone. Blank = close it by hand.",
     )
+    production_lead_days = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Business days to produce this store's order once it closes. Blank = the site default.",
+    )
+    ship_days_estimate = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Business days in transit after production. Blank = the site default.",
+    )
+    arrival_buffer_days = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="How many business days wide the arrival range is. Blank = the site default.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -82,6 +94,13 @@ class Store(models.Model):
 
     def __str__(self):
         return f"{self.client} — {self.name}"
+
+    @property
+    def arrival(self):
+        """The date range buyers are promised. None until the store has a close date."""
+        from .arrival import estimated_arrival
+
+        return estimated_arrival(self)
 
     @property
     def zone(self):

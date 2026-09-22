@@ -12,6 +12,8 @@
     <dt class="muted text-sm">Time zone</dt><dd>{{ store.get_time_zone_display }}</dd>
     <dt class="muted text-sm">Opens</dt><dd>{{ store.opens_local|date:"M j, Y, g:i a T"|default:"Not set" }}</dd>
     <dt class="muted text-sm">Closes</dt><dd>{{ store.closes_local|date:"M j, Y, g:i a T"|default:"Not set" }}</dd>
+    <dt class="muted text-sm">Buyers are told</dt>
+    <dd>{% if store.arrival %}Arrives {{ store.arrival.label }}{% else %}<span class="muted">Nothing — the store has no close date</span>{% endif %}</dd>
     <dt class="muted text-sm">Public link</dt>
     <dd><a href="{% url 'store_detail' store.slug %}" target="_blank" class="text-brand hover:underline">{{ store.slug }}</a>{% if store.subdomain %} <span class="muted">· {{ store.subdomain }}.inkedgraphics.com</span>{% endif %}</dd>
   </dl>

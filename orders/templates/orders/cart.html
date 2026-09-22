@@ -4,7 +4,7 @@
 {% block content %}
 <h1 class="text-2xl font-bold">Your cart</h1>
 {% if items %}
-  <p class="muted">{{ store.name }}</p>
+  <p class="muted">{{ store.name }}{% if store.arrival %} · Arrives {{ store.arrival.label }}{% endif %}</p>
   <form method="post" action="{% url 'cart_update' %}">
     {% csrf_token %}
     <table class="cart">

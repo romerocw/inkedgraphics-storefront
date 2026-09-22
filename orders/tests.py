@@ -1,4 +1,4 @@
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -6,8 +6,11 @@ from django.contrib.auth.models import AnonymousUser
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
+from django.urls import reverse
+from django.utils import timezone as dj_timezone
 
 from messaging.models import OutboxEmail
+from stores.arrival import estimated_arrival
 from stores.factories import make_client, make_offering, make_order, make_product, make_staff, make_store
 from stores.models import Store
 
@@ -234,3 +237,66 @@ class OrderConfirmationTests(TestCase):
             for _ in range(2):
                 self.assertEqual(self.client.post("/stripe/webhook/", b"{}", content_type="application/json").status_code, 200)
         self.assertEqual(self.confirmations().count(), 1)
+
+
+class ArrivalPromiseTests(TestCase):
+    """One promise, shown identically everywhere a buyer can see it, and frozen onto the order."""
+
+    def setUp(self):
+        self.store = make_store(
+            name="Spring Spirit Wear", closes_at=dj_timezone.now() + timedelta(days=14)
+        )
+        self.offering = make_offering(self.store, price="40.00")
+        self.expected = estimated_arrival(self.store).label
+
+    def add_to_cart(self):
+        variant = self.offering.product.variants.first()
+        return self.client.post(
+            reverse("cart_add", args=[self.store.slug]),
+            {"store_product": self.offering.pk, "variant": variant.pk, "quantity": 1},
+        )
+
+    def test_store_page_cart_and_checkout_all_quote_the_same_dates(self):
+        pages = [self.client.get(reverse("store_detail", args=[self.store.slug]))]
+        self.add_to_cart()
+        pages.append(self.client.get(reverse("cart")))
+        pages.append(self.client.get(reverse("checkout")))
+        for page in pages:
+            self.assertContains(page, f"Arrives {self.expected}")
+
+    def test_checkout_freezes_the_promise_onto_the_order(self):
+        self.add_to_cart()
+        response = self.client.post(
+            reverse("checkout"), {"buyer_name": "Pat O'Brien", "buyer_email": "pat@example.com"}
+        )
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get()
+        self.assertEqual(order.promised_arrival.label, self.expected)
+
+    def test_the_confirmation_email_quotes_what_the_buyer_was_promised(self):
+        self.add_to_cart()
+        self.client.post(reverse("checkout"), {"buyer_name": "Pat O'Brien", "buyer_email": "pat@example.com"})
+        order = Order.objects.get()
+        mark_paid(order)
+
+        (email,) = OutboxEmail.objects.filter(kind="order_confirmation")
+        self.assertIn(f"Arrives {self.expected}", email.text_body)
+        self.assertIn(self.expected, email.html_body)
+
+    def test_the_email_keeps_the_promise_even_after_the_store_moves_its_close_date(self):
+        # The outbox sends from cron, long after checkout. The buyer keeps what they were told.
+        self.add_to_cart()
+        self.client.post(reverse("checkout"), {"buyer_name": "Pat O'Brien", "buyer_email": "pat@example.com"})
+        order = Order.objects.get()
+        self.store.closes_at += timedelta(days=30)
+        self.store.save(update_fields=["closes_at"])
+        self.assertNotEqual(self.store.arrival.label, self.expected)
+
+        mark_paid(order)
+        (email,) = OutboxEmail.objects.filter(kind="order_confirmation")
+        self.assertIn(f"Arrives {self.expected}", email.text_body)
+
+    def test_a_store_with_no_close_date_promises_nothing_anywhere(self):
+        store = make_store(closes_at=None)
+        make_offering(store, price="40.00")
+        self.assertNotContains(self.client.get(reverse("store_detail", args=[store.slug])), "Arrives")
