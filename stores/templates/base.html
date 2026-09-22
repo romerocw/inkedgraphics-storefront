@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Inked Graphics Stores{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'stores/site.css' %}">
+  {% block head %}{% endblock %}
 </head>
 <body class="flex min-h-full flex-col text-gray-800"{% if brand %} style="--color-brand: {% firstof store.primary_color brand.primary_color %}"{% endif %}>
   <header class="bg-brand text-white">

@@ -98,6 +98,21 @@ def make_order(store, status=Order.Status.PAID, items=(), **kwargs):
     return order
 
 
+class TempMediaMixin:
+    """For tests that write files: uploads go to a throwaway MEDIA_ROOT.
+
+    Share kits are real PNGs and PDFs. Without this they pile up in the project's own media
+    directory, one set per test run, and never get cleaned up.
+    """
+
+    def setUp(self):
+        super().setUp()
+        media = tempfile.TemporaryDirectory()
+        self.addCleanup(media.cleanup)
+        self.media_root = Path(media.name)
+        self.enterContext(override_settings(MEDIA_ROOT=media.name))
+
+
 class TempRunDirMixin:
     """For tests that run cron commands: heartbeat files go to a throwaway RUN_DIR."""
 

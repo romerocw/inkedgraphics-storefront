@@ -1,5 +1,6 @@
 import csv
 import io
+import logging
 from datetime import timedelta
 
 from django.contrib import messages
@@ -36,6 +37,7 @@ from orders.emails import ORDER_CONFIRMATION, queue_order_confirmation
 from orders.models import Order, OrderItem, allowed_transitions, change_status
 from stores.lifecycle import record_manual_change, schedule_notes
 from stores.models import Client, Store
+from stores.services import share_kit
 
 from .invitations import InvitationInvalid, send_invitation, user_from_token
 from .mail import site_url
@@ -59,6 +61,8 @@ from .forms import (
     TeamInviteForm,
     TeamMemberForm,
 )
+
+logger = logging.getLogger(__name__)
 
 # The statuses that mean money actually came in.
 PAID_STATUSES = [Order.Status.PAID, Order.Status.SENT_TO_OPS, Order.Status.FULFILLED]
@@ -302,6 +306,9 @@ class StoreDetailMixin(StaffRequiredMixin):
         tabs = list(self.BASE_TABS)
         if store.is_group:
             tabs.append(("packout", "Pack-out"))
+        # Nothing to share before a store is open, and a closed store keeps its last kit.
+        if store.status in (Store.Status.OPEN, Store.Status.CLOSED):
+            tabs.append(("share", "Share kit"))
         return tabs
 
     def get_store(self):
@@ -330,6 +337,10 @@ class StoreDetailMixin(StaffRequiredMixin):
             )
         if ctx["tab"] == "packout":
             ctx["packout"] = packout_groups(store)
+        if ctx["tab"] == "share":
+            ctx["share_text"] = share_kit.share_text(store)
+            ctx["share_url"] = share_kit.store_url(store)
+            ctx["share_stale"] = store.share_kit_fingerprint != share_kit.fingerprint(store)
         if ctx["tab"] == "summary":
             ctx["status_history"] = store.status_changes.select_related("changed_by").order_by("-changed_at", "-pk")[:10]
         if ctx["tab"] == "products":
@@ -355,6 +366,21 @@ class StoreDetailView(StoreDetailMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(**self.tab_context(self.object, self.request.GET.get("tab", "summary")))
+
+
+class StoreShareKitView(StoreDetailMixin, View):
+    """Rebuild a store's share kit on demand, for when staff want it now."""
+
+    def post(self, request, pk):
+        store = self.get_store()
+        try:
+            share_kit.generate(store, force=True)
+        except Exception:
+            logger.exception("share kit failed for store %s (%s)", store.pk, store.slug)
+            messages.error(request, "That share kit couldn't be built. The error has been logged.")
+        else:
+            messages.success(request, "Share kit rebuilt.")
+        return redirect(self.tab_url(store, "share"))
 
 
 class StoreProductsView(StoreDetailMixin, View):

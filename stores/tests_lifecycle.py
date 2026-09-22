@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone as dj_timezone
 
 from config import heartbeat
-from stores.factories import TempRunDirMixin, make_staff, make_store
+from stores.factories import TempMediaMixin, TempRunDirMixin, make_staff, make_store
 
 from .lifecycle import tick
 from .models import Store, StoreStatusChange
@@ -151,7 +151,7 @@ class LifecycleTransitionTests(TestCase):
         self.assertFalse(store.status_changes.exists())
 
 
-class LifecycleCommandTests(TempRunDirMixin, TestCase):
+class LifecycleCommandTests(TempMediaMixin, TempRunDirMixin, TestCase):
     def run_command(self):
         out = io.StringIO()
         call_command("lifecycle_tick", stdout=out)
@@ -162,10 +162,16 @@ class LifecycleCommandTests(TempRunDirMixin, TestCase):
         make_store(status=S.SCHEDULED, opens_at=now - HOUR)
         make_store(status=S.OPEN, closes_at=now + HOUR)
         make_store(status=S.DRAFT, opens_at=now - HOUR)
-        self.assertEqual(self.run_command(), "lifecycle_tick: opened=1 closed=0 checked=2\n")
+        self.assertEqual(
+            self.run_command(),
+            "lifecycle_tick: opened=1 closed=0 checked=2 kits_built=2 kits_failed=0\n",
+        )
 
     def test_prints_the_line_even_when_there_is_nothing_to_do(self):
-        self.assertEqual(self.run_command(), "lifecycle_tick: opened=0 closed=0 checked=0\n")
+        self.assertEqual(
+            self.run_command(),
+            "lifecycle_tick: opened=0 closed=0 checked=0 kits_built=0 kits_failed=0\n",
+        )
 
     def test_writes_the_heartbeat(self):
         self.assertIsNone(heartbeat.last_beat("lifecycle_tick"))

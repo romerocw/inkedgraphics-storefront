@@ -20,6 +20,11 @@ TIME_ZONES = [
 ]
 
 
+def share_asset_path(instance, filename):
+    """Share-kit files live under their own store's prefix, never mixed together."""
+    return f"stores/{instance.slug}/share/{filename}"
+
+
 class Client(models.Model):
     """An organization we run a private-labeled store for (school, department, business)."""
 
@@ -119,6 +124,15 @@ class Store(models.Model):
         null=True, blank=True,
         help_text="How many business days wide the arrival range is. Blank = the site default.",
     )
+    share_qr_png = models.FileField(upload_to=share_asset_path, blank=True)
+    share_qr_svg = models.FileField(upload_to=share_asset_path, blank=True)
+    share_flyer_pdf = models.FileField(upload_to=share_asset_path, blank=True)
+    share_social_png = models.FileField(upload_to=share_asset_path, blank=True)
+    share_kit_fingerprint = models.CharField(
+        max_length=64, blank=True,
+        help_text="Hash of what's printed on the share kit. Unchanged = nothing to rebuild.",
+    )
+    share_kit_generated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -127,6 +141,10 @@ class Store(models.Model):
 
     def __str__(self):
         return f"{self.client} — {self.name}"
+
+    @property
+    def has_share_kit(self):
+        return bool(self.share_kit_generated_at and self.share_social_png)
 
     @property
     def is_group(self):

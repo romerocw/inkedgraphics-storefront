@@ -1,0 +1,57 @@
+<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="text-lg font-semibold">Share kit</h2>
+    <p class="muted text-sm">
+      {% if store.share_kit_generated_at %}Built {{ store.share_kit_generated_at|date:"M j, Y, g:i a T" }}.
+      {% else %}Not built yet — the schedule builds it within five minutes of the store opening.{% endif %}
+    </p>
+  </div>
+  <form method="post" action="{% url 'console:store_share_kit' store.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="btn">{% if store.share_kit_generated_at %}Rebuild now{% else %}Generate share kit{% endif %}</button>
+  </form>
+</div>
+
+{% if share_stale and store.share_kit_generated_at %}
+<div class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+  The store has changed since this kit was built. The schedule will rebuild it within five minutes.
+</div>
+{% endif %}
+
+{% if store.has_share_kit %}
+<div class="grid gap-4 lg:grid-cols-2">
+  <div class="card">
+    <h3 class="mb-2 font-semibold">Social image</h3>
+    <img src="{{ store.share_social_png.url }}" alt="Social card for {{ store.name }}" class="w-full max-w-sm rounded-md border border-gray-200">
+    <p class="mt-3"><a href="{{ store.share_social_png.url }}" download class="btn btn-secondary">Download PNG</a></p>
+  </div>
+  <div class="card">
+    <h3 class="mb-2 font-semibold">QR code</h3>
+    <img src="{{ store.share_qr_png.url }}" alt="QR code to {{ store.name }}" class="w-40 rounded-md border border-gray-200">
+    <p class="mt-3 flex gap-2">
+      <a href="{{ store.share_qr_png.url }}" download class="btn btn-secondary">PNG</a>
+      <a href="{{ store.share_qr_svg.url }}" download class="btn btn-secondary">SVG</a>
+    </p>
+    <p class="muted mt-2 text-sm">Scans to {{ share_url }}</p>
+  </div>
+  <div class="card">
+    <h3 class="mb-2 font-semibold">Printable flyer</h3>
+    <p class="muted text-sm">US Letter, with the close date, arrival dates and the QR code.</p>
+    <p class="mt-3"><a href="{{ store.share_flyer_pdf.url }}" target="_blank" class="btn btn-secondary">Download PDF</a></p>
+  </div>
+  <div class="card">
+    <h3 class="mb-2 font-semibold">Text to send</h3>
+    <textarea id="share-text" rows="4" readonly class="input w-full font-mono text-sm">{{ share_text }}</textarea>
+    <p class="mt-3">
+      <button type="button" class="btn btn-secondary"
+              onclick="navigator.clipboard.writeText(document.getElementById('share-text').value); this.textContent='Copied';">Copy</button>
+    </p>
+  </div>
+</div>
+<p class="muted mt-4 text-sm">
+  Pasting the store link into a text or Facebook shows this image as a card —
+  <a href="{% url 'store_share_image' store.slug %}" target="_blank" class="text-brand hover:underline">preview the card image</a>.
+</p>
+{% else %}
+<p class="muted">Nothing built yet. Press the button above, or wait for the next schedule run.</p>
+{% endif %}

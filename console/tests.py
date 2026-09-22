@@ -559,6 +559,7 @@ class ConsoleAccessTests(TestCase):
             "store_products": [self.store.pk],
             "store_products_add": [self.store.pk],
             "store_orders_csv": [self.store.pk],
+            "store_share_kit": [self.store.pk],
             "orders": [],
             "orders_bulk": [],
             "order_detail": [self.order.order_number],
@@ -605,6 +606,7 @@ class ConsoleAccessTests(TestCase):
         post_only = {
             "store_products", "store_products_add", "orders_bulk", "order_status",
             "team_member_status", "team_resend_invite", "order_resend_confirmation", "email_retry",
+            "store_share_kit",
         }
         for name, args in self.staff_urls().items():
             if name in post_only:
