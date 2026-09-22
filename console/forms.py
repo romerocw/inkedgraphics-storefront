@@ -25,6 +25,30 @@ class StyledFieldsMixin:
                 field.widget.attrs.setdefault("class", INPUT)
 
 
+class SectionedFormMixin:
+    """Groups a long form under headings. SECTIONS is ((heading, (field name, ...)), ...).
+
+    Any field left out of SECTIONS still renders, in a trailing group of its own — adding a
+    model field and forgetting to place it must not make it silently disappear from the form.
+    """
+
+    SECTIONS = ()
+
+    def sections(self):
+        if not self.SECTIONS:
+            return [(None, list(self))]
+        grouped, placed = [], set()
+        for heading, names in self.SECTIONS:
+            fields = [self[name] for name in names if name in self.fields]
+            placed.update(names)
+            if fields:
+                grouped.append((heading, fields))
+        unplaced = [bound for bound in self if bound.name not in placed]
+        if unplaced:
+            grouped.append((None, unplaced))
+        return grouped
+
+
 class StyledForm(StyledFieldsMixin, forms.ModelForm):
     def _unique_slug(self, source):
         base = slugify(source) or "item"
@@ -65,8 +89,26 @@ class WallClockDateTimeField(forms.DateTimeField):
         return forms.fields.BaseTemporalField.to_python(self, value)
 
 
-class StoreForm(StyledForm):
+class StoreForm(SectionedFormMixin, StyledForm):
     DATE_FIELDS = ("opens_at", "closes_at")
+    SECTIONS = (
+        ("Store", ("client", "name", "status", "subdomain", "primary_color")),
+        ("Schedule", ("time_zone", "opens_at", "closes_at")),
+        ("Arrival promise", ("production_lead_days", "ship_days_estimate", "arrival_buffer_days")),
+        ("Fulfillment", (
+            "fulfillment_mode", "delivery_location_name", "delivery_address",
+            "delivery_contact_name", "delivery_contact_phone", "group_ship_fee", "group_delivery_fee",
+        )),
+    )
+    # Which fulfillment modes each field belongs to; the form hides the rest as the mode changes.
+    MODE_FIELDS = {
+        "delivery_location_name": Store.GROUP_MODES,
+        "delivery_address": Store.GROUP_MODES,
+        "delivery_contact_name": Store.GROUP_MODES,
+        "delivery_contact_phone": Store.GROUP_MODES,
+        "group_ship_fee": (Store.Fulfillment.GROUP_SHIP,),
+        "group_delivery_fee": (Store.Fulfillment.GROUP_DELIVERY,),
+    }
 
     class Meta:
         model = Store
@@ -113,6 +155,8 @@ class StoreForm(StyledForm):
                 self.initial[f] = value.astimezone(self.instance.zone).replace(tzinfo=None)
         if not self.instance.pk:
             self.fields["primary_color"].initial = ""
+        for name, modes in self.MODE_FIELDS.items():
+            self.fields[name].widget.attrs["data-modes"] = " ".join(modes)
 
     def clean(self):
         cleaned = super().clean()
@@ -131,6 +175,29 @@ class StoreForm(StyledForm):
         opens, closes = cleaned.get("opens_at"), cleaned.get("closes_at")
         if opens and closes and opens.tzinfo and closes.tzinfo and closes <= opens:
             self.add_error("closes_at", "The store has to close after it opens.")
+
+        mode, status = cleaned.get("fulfillment_mode"), cleaned.get("status")
+        # A draft can be half-filled, but once a store can be reached by buyers its confirmation
+        # email has to be able to tell them where to collect.
+        if mode in Store.GROUP_MODES and status != Store.Status.DRAFT:
+            if not (cleaned.get("delivery_address") or "").strip():
+                self.add_error(
+                    "delivery_address",
+                    "A group store needs the address its order is delivered to — it's what buyers "
+                    "are told at checkout and in their confirmation email.",
+                )
+        # Money typed against the wrong mode is silently ignored everywhere else, so say so here.
+        if mode != Store.Fulfillment.GROUP_SHIP and cleaned.get("group_ship_fee"):
+            self.add_error(
+                "group_ship_fee",
+                "Only a group-ship store charges buyers for delivery. Clear this or change the mode.",
+            )
+        if mode != Store.Fulfillment.GROUP_DELIVERY and cleaned.get("group_delivery_fee"):
+            self.add_error(
+                "group_delivery_fee",
+                "Only a group-delivery store bills the organization for the drop-off. "
+                "Clear this or change the mode.",
+            )
         return cleaned
 
     def save(self, commit=True):

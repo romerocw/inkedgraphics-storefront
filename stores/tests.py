@@ -4,12 +4,13 @@ import io
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from django import forms
 from django.apps import apps
 from django.template import Context, Template
 from django.test import TestCase
 from django.urls import reverse
 
-from console.forms import StoreForm
+from console.forms import SectionedFormMixin, StoreForm
 from stores.factories import make_client, make_staff, make_store
 
 from .models import Store, StoreStatusChange
@@ -168,3 +169,96 @@ class ManualStatusLogTests(TestCase):
         store = make_store(client=self.shop_client, status=Store.Status.OPEN)
         self.post(reverse("console:store_edit", args=[store.pk]), status="open", name="Renamed")
         self.assertFalse(store.status_changes.exists())
+
+
+class StoreFormFulfillmentTests(TestCase):
+    """The store form is where every store is set up, so it has to refuse a broken one."""
+
+    def setUp(self):
+        self.shop_client = make_client()
+
+    def data(self, **overrides):
+        return {
+            "client": self.shop_client.pk, "name": "Fall Store", "status": "scheduled",
+            "time_zone": "America/New_York", "opens_at": "", "closes_at": "",
+            "fulfillment_mode": Store.Fulfillment.INDIVIDUAL_SHIP,
+            "primary_color": "", "subdomain": "", **overrides,
+        }
+
+    def test_a_group_store_cannot_leave_draft_without_a_delivery_address(self):
+        for mode in Store.GROUP_MODES:
+            with self.subTest(mode=mode):
+                form = StoreForm(self.data(fulfillment_mode=mode, status="scheduled"))
+                self.assertFalse(form.is_valid())
+                self.assertIn("delivery_address", form.errors)
+
+    def test_a_group_store_with_an_address_is_accepted(self):
+        form = StoreForm(self.data(
+            fulfillment_mode=Store.Fulfillment.GROUP_DELIVERY, status="open",
+            delivery_address="6520 Georgetown Pike\nMcLean, VA 22101",
+        ))
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_a_group_store_may_stay_a_draft_while_it_is_half_filled(self):
+        form = StoreForm(self.data(fulfillment_mode=Store.Fulfillment.GROUP_SHIP, status="draft"))
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_an_individual_ship_store_needs_no_delivery_address(self):
+        self.assertTrue(StoreForm(self.data()).is_valid())
+
+    def test_a_fee_typed_against_the_wrong_mode_is_refused(self):
+        cases = [
+            (Store.Fulfillment.INDIVIDUAL_SHIP, "group_ship_fee"),
+            (Store.Fulfillment.INDIVIDUAL_SHIP, "group_delivery_fee"),
+            (Store.Fulfillment.GROUP_DELIVERY, "group_ship_fee"),
+            (Store.Fulfillment.GROUP_SHIP, "group_delivery_fee"),
+        ]
+        for mode, field in cases:
+            with self.subTest(mode=mode, field=field):
+                form = StoreForm(self.data(
+                    fulfillment_mode=mode, status="draft", delivery_address="Somewhere", **{field: "30.00"},
+                ))
+                self.assertFalse(form.is_valid())
+                self.assertIn(field, form.errors)
+
+    def test_each_fee_is_accepted_by_the_mode_it_belongs_to(self):
+        pairs = [
+            (Store.Fulfillment.GROUP_SHIP, "group_ship_fee"),
+            (Store.Fulfillment.GROUP_DELIVERY, "group_delivery_fee"),
+        ]
+        for mode, field in pairs:
+            with self.subTest(mode=mode, field=field):
+                form = StoreForm(self.data(
+                    fulfillment_mode=mode, status="draft", delivery_address="Somewhere", **{field: "30.00"},
+                ))
+                self.assertTrue(form.is_valid(), form.errors)
+
+
+class StoreFormLayoutTests(TestCase):
+    def test_every_field_lands_in_a_section(self):
+        form = StoreForm()
+        placed = [bound.name for _, fields in form.sections() for bound in fields]
+        self.assertEqual(sorted(placed), sorted(form.fields))
+
+    def test_sections_are_titled(self):
+        headings = [heading for heading, _ in StoreForm().sections()]
+        self.assertEqual(headings, ["Store", "Schedule", "Arrival promise", "Fulfillment"])
+
+    def test_a_field_added_without_a_section_still_renders(self):
+        form = StoreForm()
+        form.fields["surprise"] = forms.CharField(required=False)
+        placed = [bound.name for _, fields in form.sections() for bound in fields]
+        self.assertIn("surprise", placed)
+
+    def test_a_form_that_declares_no_sections_renders_one_flat_group(self):
+        class Plain(SectionedFormMixin, forms.Form):
+            only = forms.CharField()
+
+        (heading, fields), = Plain().sections()
+        self.assertIsNone(heading)
+        self.assertEqual([bound.name for bound in fields], ["only"])
+
+    def test_mode_only_fields_are_tagged_for_the_browser(self):
+        html = str(StoreForm()["group_delivery_fee"])
+        self.assertIn('data-modes="group_delivery"', html)
+        self.assertIn("group_ship group_delivery", str(StoreForm()["delivery_address"]))

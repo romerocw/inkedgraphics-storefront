@@ -4,17 +4,35 @@
 <h1 class="mb-4 text-2xl font-bold">{{ title }}</h1>
 <form method="post" enctype="multipart/form-data" class="card max-w-xl">{% csrf_token %}
   {% if form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ form.non_field_errors }}</div>{% endif %}
-  {% for field in form %}
-  <div class="mb-4">
+  {% for heading, fields in form.sections %}
+  {% if heading %}<h2 class="mt-6 mb-3 border-b border-gray-200 pb-1 text-sm font-semibold tracking-wide text-gray-500 uppercase first:mt-0">{{ heading }}</h2>{% endif %}
+  {% for field in fields %}
+  <div class="mb-4" data-field="{{ field.name }}"{% if field.errors %} data-has-error="1"{% endif %}>
     <label for="{{ field.id_for_label }}" class="label">{{ field.label }}</label>
     {{ field }}
     {% if field.help_text %}<p class="muted mt-1 text-xs">{{ field.help_text }}</p>{% endif %}
     {% for e in field.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
   </div>
   {% endfor %}
+  {% endfor %}
   <div class="mt-6 flex items-center gap-3">
     <button type="submit" class="btn">Save</button>
     <a href="javascript:history.back()" class="muted hover:underline">Cancel</a>
   </div>
 </form>
+<script>
+// Fields tagged with data-modes belong to particular fulfillment modes; show only the ones
+// that apply to the mode currently picked. Without this script every field stays visible,
+// and a field carrying an error is never hidden — an error nobody can see can't be fixed.
+(function () {
+  const mode = document.getElementById("id_fulfillment_mode");
+  if (!mode) return;
+  const rows = Array.from(document.querySelectorAll("[data-modes]"))
+    .map((input) => ({ modes: input.dataset.modes.split(" "), row: input.closest("[data-field]") }))
+    .filter((r) => r.row && !r.row.dataset.hasError);
+  const apply = () => rows.forEach((r) => { r.row.hidden = !r.modes.includes(mode.value); });
+  mode.addEventListener("change", apply);
+  apply();
+})();
+</script>
 {% endblock %}
