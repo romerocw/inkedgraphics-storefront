@@ -261,6 +261,10 @@ BUSINESS_HOLIDAYS = []
 # boxes, not per buyer. Billed to the organization, so it never reaches Stripe or a buyer.
 DEFAULT_GROUP_DELIVERY_FEE = 30
 
+# What buyers pay extra for the bigger sizes, unless a store product overrides it. This is
+# retail pricing and ours alone: the ops catalog carries what a blank costs us, not this.
+DEFAULT_SIZE_UPCHARGES = {"2XL": "2.00", "3XL": "3.00", "4XL": "4.00", "5XL": "5.00"}
+
 # The ops system's catalog API, on its own EC2 instance and its own database — never shared
 # (see "Not yet built" in CLAUDE.md). The token is a service credential issued over there by
 # `manage.py channel_api_token create`, scoped to catalog:read.

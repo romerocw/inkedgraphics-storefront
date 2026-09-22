@@ -28,7 +28,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
-from catalog.models import Product, StoreProduct
+from catalog.models import Blank, Product, StoreProduct
 from messaging.models import OutboxEmail
 from config import heartbeat
 from messaging.outbox import due, emails_about, retry
@@ -348,12 +348,33 @@ class StoreDetailMixin(StaffRequiredMixin):
         if ctx["tab"] == "products":
             offerings = store.offerings.select_related("product").order_by("sort_order", "pk")
             ctx["formset"] = formset if formset is not None else StoreProductFormSet(queryset=offerings)
-            ctx["add_form"] = add_form if add_form is not None else AddStoreProductsForm(products=self.candidates(store))
+            query = self.request.GET.get("q", "")
+            ctx["blank_query"] = query
+            ctx["add_form"] = (
+                add_form if add_form is not None
+                else AddStoreProductsForm(products=self.candidates(store, query))
+            )
         return ctx
 
-    def candidates(self, store):
-        """Active catalog products this store doesn't offer yet."""
-        return Product.objects.filter(is_active=True).exclude(store_offerings__store=store)
+    CANDIDATE_LIMIT = 50
+
+    def candidates(self, store, query=""):
+        """Active blanks this store doesn't offer yet, narrowed by the search box.
+
+        The ops catalog runs to a couple of hundred styles, so this is a search rather than a
+        list: without a query it shows the first page-worth as a starting point.
+        """
+        blanks = Blank.objects.filter(is_active=True).exclude(store_offerings__store=store)
+        query = (query or "").strip()
+        if query:
+            blanks = blanks.filter(
+                Q(supplier_style_code__icontains=query)
+                | Q(merch_label__icontains=query)
+                | Q(brand__icontains=query)
+                | Q(display_title__icontains=query)
+                | Q(category__icontains=query)
+            )
+        return blanks[:self.CANDIDATE_LIMIT]
 
     def render_tab(self, store, tab, **kwargs):
         return render(self.request, "console/store_detail.html", self.tab_context(store, tab, **kwargs))
@@ -403,7 +424,7 @@ class StoreProductsAddView(StoreDetailMixin, View):
 
     def post(self, request, pk):
         store = self.get_store()
-        candidates = list(self.candidates(store))
+        candidates = list(self.candidates(store, request.GET.get("q", "")))
         add_form = AddStoreProductsForm(request.POST, products=candidates)
         if not add_form.is_valid():
             messages.error(request, "Nothing was added — please check the prices below.")
@@ -411,10 +432,10 @@ class StoreProductsAddView(StoreDetailMixin, View):
 
         next_sort = (store.offerings.aggregate(m=Max("sort_order"))["m"] or 0) + 1
         added = []
-        for product, price in add_form.chosen(everything="add_all" in request.POST):
-            StoreProduct.objects.create(store=store, product=product, price=price, sort_order=next_sort)
+        for blank, price in add_form.chosen(everything="add_all" in request.POST):
+            StoreProduct.objects.create(store=store, blank=blank, price=price, sort_order=next_sort)
             next_sort += 1
-            added.append(product.name)
+            added.append(blank.buyer_name)
 
         if added:
             messages.success(request, f"Added {len(added)} product{'' if len(added) == 1 else 's'} to {store.name}.")

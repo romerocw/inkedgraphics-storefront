@@ -3,7 +3,7 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from catalog.models import ProductVariant, StoreProduct
+from catalog.models import BlankVariant, ProductVariant, StoreProduct
 from stores.arrival import estimated_arrival
 from stores.models import Store
 
@@ -17,7 +17,10 @@ from .models import Order, OrderItem
 def cart_add(request, slug):
     store = get_object_or_404(Store, slug=slug, status=Store.Status.OPEN)
     sp = get_object_or_404(StoreProduct, id=request.POST.get("store_product"), store=store, is_active=True)
-    variant = get_object_or_404(ProductVariant, id=request.POST.get("variant"), product=sp.product, is_active=True)
+    if sp.blank_id:
+        variant = get_object_or_404(BlankVariant, id=request.POST.get("variant"), blank=sp.blank, is_active=True)
+    else:
+        variant = get_object_or_404(ProductVariant, id=request.POST.get("variant"), product=sp.product, is_active=True)
     try:
         qty = max(1, int(request.POST.get("quantity", 1)))
     except ValueError:
@@ -78,8 +81,11 @@ def checkout(request):
                 order.promised_arrival_earliest, order.promised_arrival_latest = arrival
             order.save()
             for i in items:
+                variant = i["variant"]
                 OrderItem.objects.create(
-                    order=order, store_product=i["store_product"], variant=i["variant"],
+                    order=order, store_product=i["store_product"],
+                    blank_variant=variant if isinstance(variant, BlankVariant) else None,
+                    variant=None if isinstance(variant, BlankVariant) else variant,
                     quantity=i["qty"], unit_price=i["unit_price"], recipient_label=i["label"],
                 )
             order.recalculate()

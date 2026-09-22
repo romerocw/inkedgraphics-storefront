@@ -10,7 +10,8 @@ from django.utils import timezone
 from catalog.models import Product, ProductVariant
 from orders.models import Order, OrderItem
 from stores.factories import (
-    make_client, make_group_store, make_offering, make_order, make_owner, make_product, make_staff, make_store,
+    make_blank, make_blank_offering, make_client, make_group_store, make_offering, make_order,
+    make_owner, make_product, make_staff, make_store,
 )
 from stores.models import Store
 
@@ -62,16 +63,16 @@ class PasswordChangeTests(TestCase):
 class StoreProductsTests(TestCase):
     def setUp(self):
         self.store = make_store()
-        self.hoodie = make_product(name="Hoodie", sku_prefix="HOOD")
-        self.tee = make_product(name="Tee", sku_prefix="TEE", default_price="20.00")
-        self.retired = make_product(name="Retired Jacket", sku_prefix="JKT", is_active=False)
+        self.hoodie = make_blank(merch_label="Hoodie", supplier_style_code="HOOD1")
+        self.tee = make_blank(merch_label="Tee", supplier_style_code="TEE1")
+        self.retired = make_blank(merch_label="Retired Jacket", supplier_style_code="JKT1", is_active=False)
         self.client.force_login(make_staff())
 
     def products_url(self, tab="products"):
         return f"{reverse('console:store_detail', args=[self.store.pk])}?tab={tab}"
 
-    def test_add_panel_offers_only_active_products_not_yet_in_the_store(self):
-        make_offering(self.store, self.hoodie)
+    def test_add_panel_offers_only_active_blanks_not_yet_in_the_store(self):
+        make_blank_offering(self.store, self.hoodie)
         response = self.client.get(self.products_url())
         self.assertEqual(list(response.context["add_form"].products), [self.tee])
 
@@ -82,24 +83,30 @@ class StoreProductsTests(TestCase):
             follow=True,
         )
         offering = self.store.offerings.get()
-        self.assertEqual((offering.product, offering.price), (self.tee, Decimal("25.50")))
+        self.assertEqual((offering.blank, offering.price), (self.tee, Decimal("25.50")))
         self.assertTrue(offering.is_active)
         self.assertContains(response, "Added 1 product")
 
-    def test_price_defaults_to_the_products_usual_price(self):
-        self.client.post(
+    def test_a_blank_cannot_be_added_without_a_retail_price(self):
+        # The ops catalog carries what a blank costs us, never what a buyer should pay, so
+        # there is nothing sensible to fall back to.
+        response = self.client.post(
             reverse("console:store_products_add", args=[self.store.pk]),
             {"add_selected": "1", f"add_{self.tee.pk}": "on", f"price_{self.tee.pk}": ""},
         )
-        self.assertEqual(self.store.offerings.get().price, self.tee.default_price)
+        self.assertEqual(self.store.offerings.count(), 0)
+        self.assertContains(response, "Set the price buyers pay")
 
-    def test_add_all_skips_products_already_in_the_store_and_inactive_ones(self):
-        make_offering(self.store, self.hoodie, price="30.00")
-        self.client.post(reverse("console:store_products_add", args=[self.store.pk]), {"add_all": "1"})
-        self.assertEqual(
-            sorted(self.store.offerings.values_list("product__name", flat=True)), ["Hoodie", "Tee"]
+    def test_add_all_skips_blanks_already_in_the_store_and_inactive_ones(self):
+        make_blank_offering(self.store, self.hoodie, price="30.00")
+        self.client.post(
+            reverse("console:store_products_add", args=[self.store.pk]),
+            {"add_all": "1", f"price_{self.tee.pk}": "22.00"},
         )
-        self.assertEqual(self.store.offerings.get(product=self.hoodie).price, Decimal("30.00"))
+        self.assertEqual(
+            sorted(self.store.offerings.values_list("blank__merch_label", flat=True)), ["Hoodie", "Tee"]
+        )
+        self.assertEqual(self.store.offerings.get(blank=self.hoodie).price, Decimal("30.00"))
 
     def test_adding_nothing_tells_staff_what_to_do(self):
         response = self.client.post(
@@ -117,7 +124,7 @@ class StoreProductsTests(TestCase):
         self.assertContains(response, "Nothing was added")
 
     def test_inline_edits_save_price_active_and_order(self):
-        offering = make_offering(self.store, self.hoodie, price="40.00")
+        offering = make_blank_offering(self.store, self.hoodie, price="40.00")
         response = self.client.post(
             reverse("console:store_products", args=[self.store.pk]),
             {
@@ -133,7 +140,7 @@ class StoreProductsTests(TestCase):
         self.assertContains(response, "Saved 1 product")
 
     def test_a_bad_inline_edit_saves_nothing(self):
-        offering = make_offering(self.store, self.hoodie, price="40.00")
+        offering = make_blank_offering(self.store, self.hoodie, price="40.00")
         response = self.client.post(
             reverse("console:store_products", args=[self.store.pk]),
             {
@@ -146,7 +153,7 @@ class StoreProductsTests(TestCase):
         self.assertContains(response, "weren&#x27;t saved")
 
     def test_summary_shows_paid_orders_and_revenue(self):
-        offering = make_offering(self.store, self.hoodie, price="40.00")
+        offering = make_blank_offering(self.store, self.hoodie, price="40.00")
         make_order(self.store, items=[(offering, 2)])
         make_order(self.store, status=Order.Status.PENDING, items=[(offering, 1)])
         response = self.client.get(reverse("console:store_detail", args=[self.store.pk]))

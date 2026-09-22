@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
-from catalog.models import ProductVariant, StoreProduct
+from catalog.models import BlankVariant, ProductVariant, StoreProduct
 from stores.arrival import ArrivalEstimate
 from stores.models import Store
 
@@ -92,7 +92,14 @@ class OrderItem(models.Model):
 
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
     store_product = models.ForeignKey(StoreProduct, on_delete=models.PROTECT)
-    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT)
+    blank_variant = models.ForeignKey(
+        BlankVariant, on_delete=models.PROTECT, null=True, blank=True,
+        help_text="The ops variant bought. Set for everything sold from a synced blank.",
+    )
+    variant = models.ForeignKey(
+        ProductVariant, on_delete=models.PROTECT, null=True, blank=True,
+        help_text="Legacy catalog variant, on orders placed before the ops sync.",
+    )
     product_name = models.CharField(max_length=200)
     variant_label = models.CharField(max_length=100, blank=True)
     sku = models.CharField(max_length=40)
@@ -111,15 +118,21 @@ class OrderItem(models.Model):
     def line_total(self):
         return self.unit_price * self.quantity
 
+    @property
+    def bought(self):
+        """The catalog row this line was bought from, whichever catalog that was."""
+        return self.blank_variant or self.variant
+
     def save(self, *args, **kwargs):
+        bought = self.bought
         if not self.product_name:
             self.product_name = self.store_product.name
-        if not self.variant_label:
-            self.variant_label = " / ".join(p for p in (self.variant.color, self.variant.size) if p)
-        if not self.sku:
-            self.sku = self.variant.sku
+        if not self.variant_label and bought:
+            self.variant_label = " / ".join(p for p in (bought.color, bought.size) if p)
+        if not self.sku and bought:
+            self.sku = bought.sku
         if self.unit_price is None:
-            self.unit_price = self.store_product.price + self.variant.upcharge
+            self.unit_price = self.store_product.price_for(bought)
         super().save(*args, **kwargs)
 
 

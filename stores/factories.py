@@ -76,6 +76,32 @@ def make_product(name=None, sku_prefix=None, default_price="45.00", variants=(("
     return product
 
 
+def make_blank(style_id=None, merch_label=None, sizes=("M", "2XL"), color="Black", **kwargs):
+    """A style as if it had come from the ops sync, with a variant per size."""
+    from catalog.models import Blank, BlankVariant
+
+    n = style_id or next(counter)
+    kwargs.setdefault("supplier_style_code", f"ST{n}")
+    kwargs.setdefault("brand", "Comfort Colors")
+    kwargs.setdefault("display_title", "SUPPLIER COPY — never shown to buyers")
+    kwargs.setdefault("base_cost", Decimal("12.00"))
+    kwargs.setdefault("ops_updated_at", timezone.now())
+    blank = Blank.objects.create(style_id=n, merch_label=merch_label or "", **kwargs)
+    for i, size in enumerate(sizes):
+        BlankVariant.objects.create(
+            blank=blank, blank_sku=f"{blank.supplier_style_code}-{color}-{size}",
+            color_name=color, size=size, size_sort_order=i,
+        )
+    return blank
+
+
+def make_blank_offering(store, blank=None, price="40.00", **kwargs):
+    """What a store sells, from a synced blank."""
+    return StoreProduct.objects.create(
+        store=store, blank=blank or make_blank(), price=Decimal(price), **kwargs
+    )
+
+
 def make_offering(store, product=None, price=None, **kwargs):
     product = product or make_product()
     price = Decimal(price) if price is not None else product.default_price
@@ -90,8 +116,11 @@ def make_order(store, status=Order.Status.PAID, items=(), **kwargs):
         kwargs.setdefault("paid_at", timezone.now())
     order = Order.objects.create(store=store, status=status, **kwargs)
     for offering, quantity in items:
+        variant = offering.variants().first()
         OrderItem.objects.create(
-            order=order, store_product=offering, variant=offering.product.variants.first(), quantity=quantity
+            order=order, store_product=offering, quantity=quantity,
+            blank_variant=variant if offering.blank_id else None,
+            variant=None if offering.blank_id else variant,
         )
     if items:
         order.recalculate()

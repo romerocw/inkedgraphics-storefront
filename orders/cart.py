@@ -1,7 +1,7 @@
 import secrets
 from decimal import Decimal
 
-from catalog.models import ProductVariant, StoreProduct
+from catalog.models import BlankVariant, ProductVariant, StoreProduct
 
 SESSION_KEY = "cart"
 
@@ -24,12 +24,15 @@ class Cart:
         if self.store_id and self.store_id != store_product.store_id:
             self.data["lines"] = {}
         self.data["store_id"] = store_product.store_id
-        key = f"{store_product.id}:{variant.id}"
+        kind = "blank" if isinstance(variant, BlankVariant) else "product"
+        key = f"{store_product.id}:{kind}:{variant.id}"
         if separate_line:
             # Group stores name a recipient per line, so the same hoodie ordered for a second
             # child stays its own row instead of bumping the first one's quantity.
             key = f"{key}:{secrets.token_hex(3)}"
-        line = self.data["lines"].setdefault(key, {"sp": store_product.id, "v": variant.id, "qty": 0})
+        line = self.data["lines"].setdefault(
+            key, {"sp": store_product.id, "v": variant.id, "kind": kind, "qty": 0},
+        )
         line["qty"] += qty
         self.save()
 
@@ -59,13 +62,24 @@ class Cart:
 
     def items(self):
         lines = self.data["lines"]
-        products = StoreProduct.objects.select_related("product").in_bulk([l["sp"] for l in lines.values()])
-        variants = ProductVariant.objects.in_bulk([l["v"] for l in lines.values()])
+        products = StoreProduct.objects.select_related("product", "blank").in_bulk(
+            [l["sp"] for l in lines.values()]
+        )
+        variants = {
+            "blank": BlankVariant.objects.in_bulk(
+                [l["v"] for l in lines.values() if l.get("kind") == "blank"]
+            ),
+            # Lines put in the cart before the ops sync, and any legacy store product.
+            "product": ProductVariant.objects.in_bulk(
+                [l["v"] for l in lines.values() if l.get("kind", "product") != "blank"]
+            ),
+        }
         for key, line in lines.items():
-            sp, variant = products.get(line["sp"]), variants.get(line["v"])
+            sp = products.get(line["sp"])
+            variant = variants[line.get("kind", "product")].get(line["v"])
             if not sp or not variant:
                 continue
-            unit = sp.price + variant.upcharge
+            unit = sp.price_for(variant)
             yield {
                 "key": key, "store_product": sp, "variant": variant, "qty": line["qty"],
                 "label": line.get("label", ""),

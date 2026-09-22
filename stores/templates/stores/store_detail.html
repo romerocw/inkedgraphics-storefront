@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load catalog_extras %}
 {% block title %}{{ store.name }}{% endblock %}
 {% block head %}
 {# So a link pasted into a group text or Facebook renders as a card, not a bare URL. #}
@@ -22,9 +23,11 @@
   <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
   {% for item in offerings %}
     <div class="card">
-      {% if item.product.image %}<img src="{{ item.product.image.url }}" alt="" class="mb-3 aspect-square w-full rounded-md object-cover">{% endif %}
+      {% if item.image %}<img src="{{ item.image.url }}" alt="" class="mb-3 aspect-square w-full rounded-md object-cover">
+      {% elif item.product.image %}<img src="{{ item.product.image.url }}" alt="" class="mb-3 aspect-square w-full rounded-md object-cover">{% endif %}
       <h2 class="text-lg font-semibold">{{ item.name }}</h2>
-      {% if item.product.description %}<p class="mt-1 text-sm text-gray-600">{{ item.product.description }}</p>{% endif %}
+      {% if item.description %}<p class="mt-1 text-sm text-gray-600">{{ item.description }}</p>
+      {% elif item.product.description %}<p class="mt-1 text-sm text-gray-600">{{ item.product.description }}</p>{% endif %}
       <p class="mt-3 text-xl font-bold">${{ item.price }}</p>
       {% if arrival %}<p class="mb-3 text-sm text-gray-600">Arrives {{ arrival.label }}</p>{% else %}<div class="mb-3"></div>{% endif %}
       <form method="post" action="{% url 'cart_add' store.slug %}">
@@ -32,9 +35,9 @@
         <input type="hidden" name="store_product" value="{{ item.id }}">
         <label class="label">Size
           <select name="variant" required class="input">
-            {% for v in item.product.variants.all %}{% if v.is_active %}
-              <option value="{{ v.id }}">{{ v.color }} {{ v.size }}{% if v.upcharge %} (+${{ v.upcharge }}){% endif %}</option>
-            {% endif %}{% endfor %}
+            {% for v in item.variants %}
+              <option value="{{ v.id }}">{{ v.color }} {{ v.size }}{% with up=item|surcharge:v %}{% if up %} (+${{ up }}){% endif %}{% endwith %}</option>
+            {% endfor %}
           </select>
         </label>
         <label class="label mt-3">Qty <input type="number" name="quantity" value="1" min="1" max="20" class="input"></label>

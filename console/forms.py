@@ -281,31 +281,44 @@ StoreProductFormSet = forms.modelformset_factory(StoreProduct, form=ConsoleStore
 
 
 class AddStoreProductsForm(StyledFieldsMixin, forms.Form):
-    """Checkbox + price per catalog product a store doesn't offer yet."""
+    """Checkbox + retail price per blank a store doesn't offer yet.
+
+    The price is required: the ops catalog carries what a blank costs us, never what a buyer
+    should pay, so there is no sensible number to pre-fill.
+    """
 
     def __init__(self, *args, products=(), **kwargs):
         super().__init__(*args, **kwargs)
         self.products = list(products)
-        for product in self.products:
-            self.fields[f"add_{product.pk}"] = forms.BooleanField(required=False, label=product.name)
-            self.fields[f"price_{product.pk}"] = forms.DecimalField(
+        for blank in self.products:
+            self.fields[f"add_{blank.pk}"] = forms.BooleanField(required=False, label=blank.buyer_name)
+            self.fields[f"price_{blank.pk}"] = forms.DecimalField(
                 max_digits=8, decimal_places=2, min_value=0, required=False,
-                initial=product.default_price, label=f"Price for {product.name}",
+                label=f"Price for {blank.buyer_name}",
             )
         for field in self.fields.values():
             if isinstance(field, forms.DecimalField):
                 field.widget.attrs["class"] = INPUT
 
     def rows(self):
-        for product in self.products:
-            yield {"product": product, "add": self[f"add_{product.pk}"], "price": self[f"price_{product.pk}"]}
+        for blank in self.products:
+            yield {"product": blank, "add": self[f"add_{blank.pk}"], "price": self[f"price_{blank.pk}"]}
+
+    def clean(self):
+        cleaned = super().clean()
+        for blank in self.products:
+            if cleaned.get(f"add_{blank.pk}") and cleaned.get(f"price_{blank.pk}") is None:
+                self.add_error(f"price_{blank.pk}", "Set the price buyers pay for this.")
+        return cleaned
 
     def chosen(self, everything=False):
-        """(product, price) pairs staff asked for. A blank price means the product's usual price."""
-        for product in self.products:
-            if everything or self.cleaned_data.get(f"add_{product.pk}"):
-                price = self.cleaned_data.get(f"price_{product.pk}")
-                yield product, product.default_price if price is None else price
+        """(blank, price) pairs staff asked for. Priced blanks only."""
+        for blank in self.products:
+            price = self.cleaned_data.get(f"price_{blank.pk}")
+            if price is None:
+                continue
+            if everything or self.cleaned_data.get(f"add_{blank.pk}"):
+                yield blank, price
 
 
 class OrderFilterForm(StyledFieldsMixin, forms.Form):

@@ -53,29 +53,92 @@ class ProductVariant(models.Model):
 
 
 class StoreProduct(models.Model):
-    """A product offered in one store, at that store's price."""
+    """A product offered in one store, at that store's price.
+
+    Backed by a Blank synced from ops. `product` is the old hand-made catalog, kept only until
+    every store product has been re-picked against a blank; exactly one of the two is set.
+    """
 
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name="offerings")
-    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="store_offerings")
+    blank = models.ForeignKey(
+        "Blank", on_delete=models.PROTECT, related_name="store_offerings", null=True, blank=True,
+        help_text="The ops style this is sold from.",
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="store_offerings", null=True, blank=True,
+        help_text="Legacy hand-made catalog. Being replaced by blank; don't use for new products.",
+    )
     display_name = models.CharField(
         max_length=200, blank=True,
         help_text="Optional override, e.g. 'Langley Lacrosse Hoodie'. Blank = product name.",
     )
+    description = models.TextField(
+        blank=True, help_text="Shown to buyers. The ops catalog has no buyer-facing copy.",
+    )
+    image = models.ImageField(
+        upload_to="store_products/", blank=True,
+        help_text="Shown to buyers. Ops' supplier images are missing for most styles.",
+    )
     price = models.DecimalField(max_digits=8, decimal_places=2)
+    size_upcharges = models.JSONField(
+        default=dict, blank=True,
+        help_text='What buyers pay extra for a size, e.g. {"2XL": "2.00"}. Empty = the site default. '
+                  "Nothing to do with what the blank costs us.",
+    )
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["store", "sort_order"]
-        unique_together = [("store", "product")]
+        constraints = [
+            models.UniqueConstraint(fields=["store", "blank"], name="one_offering_per_blank_per_store"),
+            models.UniqueConstraint(fields=["store", "product"], name="one_offering_per_product_per_store"),
+            models.CheckConstraint(
+                condition=models.Q(blank__isnull=False, product__isnull=True)
+                | models.Q(blank__isnull=True, product__isnull=False),
+                name="offering_has_exactly_one_source",
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.store.name}: {self.display_name or self.product.name}"
+        return f"{self.store.name}: {self.name}"
+
+    @property
+    def source(self):
+        """The blank this is sold from, or the legacy product until it's re-picked."""
+        return self.blank or self.product
 
     @property
     def name(self):
-        return self.display_name or self.product.name
+        if self.display_name:
+            return self.display_name
+        # Never the blank's display_title: that's supplier copy, staff-facing only.
+        return self.blank.buyer_name if self.blank_id else self.product.name
+
+    def variants(self):
+        """The sizes and colours a buyer can pick, whichever catalog backs this."""
+        return self.source.variants.filter(is_active=True)
+
+    def upcharge_for(self, size):
+        """What a buyer pays on top of `price` for this size. Blank map = the site default."""
+        from decimal import Decimal
+
+        from django.conf import settings
+
+        table = self.size_upcharges or getattr(settings, "DEFAULT_SIZE_UPCHARGES", {}) or {}
+        return Decimal(str(table.get((size or "").upper(), "0")))
+
+    def price_for(self, variant):
+        """What a buyer pays for this variant, surcharge included.
+
+        A legacy variant carries its own upcharge, set by hand when the product was made, so
+        it keeps it — moving to the site's size table must not silently reprice anything that
+        hasn't been re-picked against a blank yet.
+        """
+        if variant is not None and hasattr(variant, "upcharge"):
+            return self.price + variant.upcharge
+        return self.price + self.upcharge_for(getattr(variant, "size", ""))
 
 
 # --- The catalog synced from ops (API A; see docs/ops-storefront-api.md) --------------------
@@ -179,6 +242,20 @@ class BlankVariant(SyncedModel):
     @property
     def label(self):
         return " / ".join(p for p in (self.color_name, self.size) if p)
+
+    # Named like ProductVariant so templates, the cart and OrderItem can treat the two alike
+    # while store products are being moved across. They go away with ProductVariant.
+    @property
+    def color(self):
+        return self.color_name
+
+    @property
+    def sku(self):
+        return self.blank_sku
+
+    @property
+    def sort_order(self):
+        return self.size_sort_order or 0
 
 
 class BlankImage(models.Model):

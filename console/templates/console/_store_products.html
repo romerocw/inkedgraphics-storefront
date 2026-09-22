@@ -8,10 +8,13 @@
     <tr>
       <td>
         {{ f.id }}{{ f.display_name }}
-        <p class="muted mt-1 text-xs">Leave blank to use "{{ f.instance.product.name }}".</p>
+        <p class="muted mt-1 text-xs">Leave blank to use "{{ f.instance.name }}".</p>
         {% for e in f.display_name.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
       </td>
-      <td>{{ f.instance.product.name }}<br><span class="muted text-xs">{{ f.instance.product.sku_prefix }}</span></td>
+      <td>
+        {% if f.instance.blank_id %}{{ f.instance.blank.buyer_name }}<br><span class="muted text-xs">{{ f.instance.blank.supplier_style_code }}</span>
+        {% else %}{{ f.instance.product.name }}<br><span class="muted text-xs">{{ f.instance.product.sku_prefix }} · legacy catalog</span>{% endif %}
+      </td>
       <td>{{ f.price }}{% for e in f.price.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}</td>
       <td>{{ f.is_active }}</td>
       <td>{{ f.sort_order }}{% for e in f.sort_order.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}</td>
@@ -25,19 +28,25 @@
 {% endif %}
 
 <h2 class="mt-8 mb-2 text-lg font-semibold">Add products to this store</h2>
+<form method="get" class="mb-3 flex items-center gap-2">
+  <input type="hidden" name="tab" value="products">
+  <input type="search" name="q" value="{{ blank_query }}" placeholder="Search the ops catalog — style code, brand, category" class="input max-w-md">
+  <button type="submit" class="btn btn-secondary">Search</button>
+  {% if blank_query %}<a href="?tab=products" class="muted hover:underline">Clear</a>{% endif %}
+</form>
 {% if add_form.products %}
 <form method="post" action="{% url 'console:store_products_add' store.pk %}">{% csrf_token %}
   {% if add_form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ add_form.non_field_errors }}</div>{% endif %}
   <table class="cart">
     <tr>
       <th class="w-10"><input type="checkbox" id="check-all" aria-label="Select every product"></th>
-      <th>Product</th><th>Usual price</th><th>Price in this store <span class="muted font-normal">(blank = usual)</span></th>
+      <th>Blank</th><th>Our cost</th><th>Price buyers pay</th>
     </tr>
     {% for row in add_form.rows %}
     <tr>
       <td>{{ row.add }}</td>
-      <td>{{ row.product.name }}<br><span class="muted text-xs">{{ row.product.sku_prefix }} · {{ row.product.variants.count }} size/color options</span></td>
-      <td class="muted">${{ row.product.default_price|floatformat:2 }}</td>
+      <td>{{ row.product.buyer_name }}<br><span class="muted text-xs">{{ row.product.supplier_style_code }}{% if row.product.category %} · {{ row.product.category }}{% endif %} · {{ row.product.variants.count }} size/color options</span></td>
+      <td class="muted">{% if row.product.base_cost %}${{ row.product.base_cost|floatformat:2 }}{% else %}—{% endif %}</td>
       <td>{{ row.price }}{% for e in row.price.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}</td>
     </tr>
     {% endfor %}
@@ -53,5 +62,8 @@
   });
 </script>
 {% else %}
-<p class="muted">Every active product in the catalog is already in this store. <a href="{% url 'console:products' %}" class="text-brand hover:underline">Add a new product to the catalog</a> to offer something else.</p>
+<p class="muted">
+  {% if blank_query %}Nothing in the ops catalog matches "{{ blank_query }}" that isn't already in this store.
+  {% else %}No blanks to add. Run <code>manage.py sync_catalog</code>, or everything active is already in this store.{% endif %}
+</p>
 {% endif %}

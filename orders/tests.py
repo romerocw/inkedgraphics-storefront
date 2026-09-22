@@ -13,12 +13,13 @@ from django.utils import timezone as dj_timezone
 from messaging.models import OutboxEmail
 from stores.arrival import estimated_arrival
 from stores.factories import (
-    make_client, make_group_store, make_offering, make_order, make_product, make_staff, make_store,
+    make_blank, make_blank_offering, make_client, make_group_store, make_offering, make_order,
+    make_product, make_staff, make_store,
 )
 from stores.models import Store
 
 from .links import order_link_key, order_url
-from .models import Order, allowed_transitions, change_status, mark_paid
+from .models import Order, OrderItem, allowed_transitions, change_status, mark_paid
 
 
 class StatusTransitionTests(TestCase):
@@ -500,3 +501,90 @@ class GroupShipFeeTests(TestCase):
             self.client.get(reverse("order_pay", args=[order.order_number]))
         names = [li["price_data"]["product_data"]["name"] for li in create.call_args.kwargs["line_items"]]
         self.assertNotIn("Delivery", names)
+
+
+class BlankBackedBuyingTests(TestCase):
+    """Buying something sold from a synced blank, end to end."""
+
+    def setUp(self):
+        self.store = make_store(name="Saxons Spirit")
+        self.blank = make_blank(merch_label="Terry Hoodie", sizes=("M", "2XL"))
+        self.offering = make_blank_offering(self.store, self.blank, price="40.00")
+
+    def variant(self, size):
+        return self.blank.variants.get(size=size)
+
+    def add(self, size, qty=1):
+        return self.client.post(
+            reverse("cart_add", args=[self.store.slug]),
+            {"store_product": self.offering.pk, "variant": self.variant(size).pk, "quantity": qty},
+        )
+
+    def test_the_store_page_offers_the_blanks_sizes(self):
+        page = self.client.get(reverse("store_detail", args=[self.store.slug]))
+        self.assertContains(page, "Terry Hoodie")
+        self.assertContains(page, "2XL")
+        # Supplier catalog copy is staff-facing only and must never reach a buyer.
+        self.assertNotContains(page, "SUPPLIER COPY")
+
+    def test_the_size_surcharge_is_shown_to_buyers(self):
+        page = self.client.get(reverse("store_detail", args=[self.store.slug]))
+        self.assertContains(page, "(+$2.00)")
+
+    def test_a_variant_from_another_blank_is_refused(self):
+        other = make_blank(sizes=("M",))
+        response = self.client.post(
+            reverse("cart_add", args=[self.store.slug]),
+            {"store_product": self.offering.pk, "variant": other.variants.get().pk, "quantity": 1},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_an_archived_variant_cannot_be_bought(self):
+        self.blank.variants.filter(size="2XL").update(is_active=False)
+        self.assertEqual(self.add("2XL").status_code, 404)
+
+    def test_the_cart_prices_each_size_correctly(self):
+        self.add("M")
+        self.add("2XL")
+        page = self.client.get(reverse("cart"))
+        self.assertContains(page, "$40.00")
+        self.assertContains(page, "$42.00")
+
+    def test_checkout_records_the_ops_sku_on_the_order(self):
+        self.add("2XL", qty=2)
+        self.client.post(reverse("checkout"), {"buyer_name": "Pat", "buyer_email": "pat@example.com"})
+
+        item = OrderItem.objects.get()
+        self.assertEqual(item.blank_variant, self.variant("2XL"))
+        self.assertIsNone(item.variant)
+        self.assertEqual(item.sku, self.variant("2XL").blank_sku)
+        self.assertEqual(item.variant_label, "Black / 2XL")
+        self.assertEqual(item.unit_price, Decimal("42.00"))
+        self.assertEqual(item.line_total, Decimal("84.00"))
+        self.assertEqual(item.product_name, "Terry Hoodie")
+
+    def test_the_ops_sku_reaches_the_hand_off_csv(self):
+        self.add("2XL")
+        self.client.post(reverse("checkout"), {"buyer_name": "Pat", "buyer_email": "pat@example.com"})
+        order = Order.objects.get()
+        mark_paid(order)
+
+        self.client.force_login(make_staff())
+        response = self.client.get(reverse("console:store_orders_csv", args=[self.store.pk]))
+        self.assertIn(self.variant("2XL").blank_sku, response.content.decode("utf-8-sig"))
+
+    def test_a_legacy_offering_still_sells(self):
+        # Store products not yet re-picked against a blank must keep working until they are.
+        store = make_store()
+        offering = make_offering(store, make_product(variants=(("Black", "M"),)), price="30.00")
+        variant = offering.product.variants.get()
+        self.client.post(
+            reverse("cart_add", args=[store.slug]),
+            {"store_product": offering.pk, "variant": variant.pk, "quantity": 1},
+        )
+        self.client.post(reverse("checkout"), {"buyer_name": "Pat", "buyer_email": "pat@example.com"})
+
+        item = OrderItem.objects.get()
+        self.assertEqual(item.variant, variant)
+        self.assertIsNone(item.blank_variant)
+        self.assertEqual(item.unit_price, Decimal("30.00"))

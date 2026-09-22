@@ -30,9 +30,9 @@ def store_detail(request, slug):
     if store.status == Store.Status.DRAFT and not request.user.is_staff:
         return render(request, "stores/closed.html", {"store": store}, status=404)
     offerings = (
-        store.offerings.filter(is_active=True, product__is_active=True)
-        .select_related("product")
-        .prefetch_related("product__variants")
+        store.offerings.filter(is_active=True)
+        .select_related("product", "blank")
+        .prefetch_related("product__variants", "blank__variants", "blank__images")
     )
     return render(
         request,
