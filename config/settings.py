@@ -260,6 +260,14 @@ BUSINESS_HOLIDAYS = []
 # boxes, not per buyer. Billed to the organization, so it never reaches Stripe or a buyer.
 DEFAULT_GROUP_DELIVERY_FEE = 30
 
+# The ops system's catalog API, on its own EC2 instance and its own database — never shared
+# (see "Not yet built" in CLAUDE.md). The token is a service credential issued over there by
+# `manage.py channel_api_token create`, scoped to catalog:read.
+# Both blank means no ops link, which is the normal state until the catalog sync is built;
+# catalog/checks.py complains only when one is set without the other.
+OPS_API_URL = os.environ.get("OPS_API_URL", "").rstrip("/")
+OPS_API_TOKEN = os.environ.get("OPS_API_TOKEN", "")
+
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
