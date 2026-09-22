@@ -209,8 +209,8 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             open_stores=Store.objects.filter(status=Store.Status.OPEN).count(),
             orders_total=paid.count(),
             orders_week=paid.filter(paid_at__gte=week_ago).count(),
-            revenue_total=paid.aggregate(s=Sum("total"))["s"] or 0,
-            revenue_week=paid.filter(paid_at__gte=week_ago).aggregate(s=Sum("total"))["s"] or 0,
+            revenue_total=paid.aggregate(s=Sum("subtotal"))["s"] or 0,
+            revenue_week=paid.filter(paid_at__gte=week_ago).aggregate(s=Sum("subtotal"))["s"] or 0,
             recent_orders=paid.select_related("store")[:10],
             closing_soon=Store.objects.filter(status=Store.Status.OPEN, closes_at__lte=timezone.now() + timedelta(days=7)).select_related("client")[:10],
         )
@@ -264,7 +264,7 @@ class StoreListView(StaffRequiredMixin, ListView):
     template_name = "console/store_list.html"
     queryset = (
         Store.objects.select_related("client")
-        .annotate(paid_orders=Count("orders", filter=PAID, distinct=True), revenue=Sum("orders__total", filter=PAID))
+        .annotate(paid_orders=Count("orders", filter=PAID, distinct=True), revenue=Sum("orders__subtotal", filter=PAID))
     )
 
 
@@ -284,7 +284,7 @@ class StoreDetailMixin(StaffRequiredMixin):
             "tab": tab if tab in dict(self.tabs) else "summary",
             "tabs": self.tabs,
             "paid_orders": paid.count(),
-            "revenue": paid.aggregate(s=Sum("total"))["s"] or 0,
+            "revenue": paid.aggregate(s=Sum("subtotal"))["s"] or 0,
         }
         if ctx["tab"] == "orders":
             ctx.update(

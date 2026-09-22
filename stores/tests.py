@@ -56,6 +56,7 @@ class StoreFormTimeZoneTests(TestCase):
         return {
             "client": self.shop_client.pk, "name": "Fall Store", "status": "scheduled",
             "time_zone": "America/Los_Angeles", "opens_at": "2026-10-01T09:00", "closes_at": "2026-10-03T18:00",
+            "fulfillment_mode": Store.Fulfillment.INDIVIDUAL_SHIP,
             "primary_color": "", "subdomain": "", **overrides,
         }
 
@@ -145,7 +146,8 @@ class ManualStatusLogTests(TestCase):
     def post(self, url, **overrides):
         data = {
             "client": self.shop_client.pk, "name": "Fall Store", "status": "draft", "time_zone": "America/New_York",
-            "opens_at": "", "closes_at": "", "primary_color": "", "subdomain": "", **overrides,
+            "opens_at": "", "closes_at": "", "fulfillment_mode": Store.Fulfillment.INDIVIDUAL_SHIP,
+            "primary_color": "", "subdomain": "", **overrides,
         }
         return self.client.post(url, data)
 

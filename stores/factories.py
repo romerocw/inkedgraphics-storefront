@@ -57,6 +57,13 @@ def make_store(client=None, name=None, **kwargs):
     return Store.objects.create(client=client or make_client(), name=name or f"Spring Store {n}", **kwargs)
 
 
+def make_group_store(mode=Store.Fulfillment.GROUP_DELIVERY, **kwargs):
+    """A store whose whole order goes to one place, with somewhere for it to go."""
+    kwargs.setdefault("delivery_location_name", "Langley High front office")
+    kwargs.setdefault("delivery_address", "6520 Georgetown Pike\nMcLean, VA 22101")
+    return make_store(fulfillment_mode=mode, **kwargs)
+
+
 def make_product(name=None, sku_prefix=None, default_price="45.00", variants=(("Black", "M"),), **kwargs):
     n = next(counter)
     name = name or f"Unisex Hoodie {n}"

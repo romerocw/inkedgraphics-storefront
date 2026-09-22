@@ -73,14 +73,12 @@ class StoreForm(StyledForm):
         fields = [
             "client", "name", "status", "time_zone", "opens_at", "closes_at",
             "production_lead_days", "ship_days_estimate", "arrival_buffer_days",
+            "fulfillment_mode", "delivery_location_name", "delivery_address",
+            "delivery_contact_name", "delivery_contact_phone",
+            "group_ship_fee", "group_delivery_fee",
             "primary_color", "subdomain",
         ]
         field_classes = {"opens_at": WallClockDateTimeField, "closes_at": WallClockDateTimeField}
-        widgets = {
-            "opens_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
-            "closes_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
-            "primary_color": forms.TextInput(attrs={"type": "color", "class": "mt-1 h-10 w-20"}),
-        }
         labels = {
             "primary_color": "Store color (overrides client color)",
             "time_zone": "Store time zone",
@@ -89,6 +87,19 @@ class StoreForm(StyledForm):
             "production_lead_days": "Production days (blank = site default)",
             "ship_days_estimate": "Shipping days (blank = site default)",
             "arrival_buffer_days": "Arrival range width (blank = site default)",
+            "fulfillment_mode": "How the order reaches buyers",
+            "delivery_location_name": "Delivery location",
+            "delivery_address": "Delivery address",
+            "delivery_contact_name": "Delivery contact",
+            "delivery_contact_phone": "Delivery contact phone",
+            "group_ship_fee": "Group-ship delivery charged to each buyer",
+            "group_delivery_fee": "Group-delivery fee billed to the organization",
+        }
+        widgets = {
+            "opens_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+            "closes_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+            "primary_color": forms.TextInput(attrs={"type": "color", "class": "mt-1 h-10 w-20"}),
+            "delivery_address": forms.Textarea(attrs={"rows": 3}),
         }
 
     def __init__(self, *args, **kwargs):

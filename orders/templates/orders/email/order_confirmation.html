@@ -12,11 +12,17 @@
   </tr>
   {% for item in items %}
   <tr>
-    <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">{{ item.product_name }}{% if item.variant_label %}<br><span style="color:#6b7280;font-size:13px;">{{ item.variant_label }}</span>{% endif %}</td>
+    <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">{{ item.product_name }}{% if item.variant_label %}<br><span style="color:#6b7280;font-size:13px;">{{ item.variant_label }}</span>{% endif %}{% if item.recipient_label %}<br><span style="color:#6b7280;font-size:13px;">For {{ item.recipient_label }}</span>{% endif %}</td>
     <td align="center" style="padding:8px;border-bottom:1px solid #f3f4f6;">{{ item.quantity }}</td>
     <td align="right" style="padding:8px 0;border-bottom:1px solid #f3f4f6;">${{ item.line_total|floatformat:2 }}</td>
   </tr>
   {% endfor %}
+  {% if order.delivery_fee %}
+  <tr>
+    <td colspan="2" style="padding:8px 0;border-bottom:1px solid #f3f4f6;">Delivery</td>
+    <td align="right" style="padding:8px 0;border-bottom:1px solid #f3f4f6;">${{ order.delivery_fee|floatformat:2 }}</td>
+  </tr>
+  {% endif %}
   <tr>
     <td colspan="2" style="padding:10px 0;font-weight:700;">Total paid</td>
     <td align="right" style="padding:10px 0;font-weight:700;">${{ order.total|floatformat:2 }}</td>
@@ -25,6 +31,12 @@
 <h2 style="margin:24px 0 8px;font-size:16px;">What happens next</h2>
 <p style="margin:0 0 12px;">{% if store.closes_at %}The store closes on <strong>{{ store.closes_local|date:"F j, Y" }} at {{ store.closes_local|date:"g:i a T" }}</strong>.{% else %}The store will close at the end of the ordering period.{% endif %} Items are produced after the store closes, then delivered the way {{ store.client.name }} has arranged for this store.</p>
 {% if arrival %}<p style="margin:0 0 12px;">Arrives <strong>{{ arrival.label }}</strong>.</p>{% endif %}
+{% if store.is_group %}
+<h2 style="margin:24px 0 8px;font-size:16px;">Where to collect it</h2>
+<p style="margin:0 0 12px;">Nothing is shipped to you — the whole order is delivered to
+<strong>{{ store.delivery_location_name|default:store.client.name }}</strong>.{% if store.delivery_contact_name %} Ask for {{ store.delivery_contact_name }}{% if store.delivery_contact_phone %} ({{ store.delivery_contact_phone }}){% endif %}.{% endif %}</p>
+{% if store.delivery_address %}<p style="margin:0 0 12px;white-space:pre-line;color:#6b7280;font-size:14px;">{{ store.delivery_address }}</p>{% endif %}
+{% endif %}
 {% include "console/email/button.html" with label="View your order" url=order_url %}
 <p style="margin:16px 0 0;color:#6b7280;font-size:13px;">Questions? Just reply to this email.</p>
 {% endblock %}

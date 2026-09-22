@@ -26,22 +26,34 @@ def order_pay(request, order_number):
         return redirect("order_detail", order_number=order.order_number)
 
     base = f"{request.scheme}://{request.get_host()}"
+    line_items = [
+        {
+            "quantity": item.quantity,
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": _cents(item.unit_price),
+                "product_data": {"name": f"{item.product_name} {item.variant_label}".strip()},
+            },
+        }
+        for item in order.items.all()
+    ]
+    # Group ship only: the consignment to the organization still costs money. A group-delivery
+    # drop-off is billed to the organization, so it never reaches a buyer's card.
+    if order.delivery_fee:
+        line_items.append({
+            "quantity": 1,
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": _cents(order.delivery_fee),
+                "product_data": {"name": "Delivery"},
+            },
+        })
     session = stripe.checkout.Session.create(
         mode="payment",
         customer_email=order.buyer_email,
         client_reference_id=order.order_number,
         metadata={"order_number": order.order_number},
-        line_items=[
-            {
-                "quantity": item.quantity,
-                "price_data": {
-                    "currency": "usd",
-                    "unit_amount": _cents(item.unit_price),
-                    "product_data": {"name": f"{item.product_name} {item.variant_label}".strip()},
-                },
-            }
-            for item in order.items.all()
-        ],
+        line_items=line_items,
         success_url=base + reverse("order_success", args=[order.order_number]) + "?session_id={CHECKOUT_SESSION_ID}",
         cancel_url=base + reverse("cart"),
     )

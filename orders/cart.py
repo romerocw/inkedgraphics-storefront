@@ -1,3 +1,4 @@
+import secrets
 from decimal import Decimal
 
 from catalog.models import ProductVariant, StoreProduct
@@ -19,14 +20,24 @@ class Cart:
     def store_id(self):
         return self.data.get("store_id")
 
-    def add(self, store_product, variant, qty):
+    def add(self, store_product, variant, qty, separate_line=False):
         if self.store_id and self.store_id != store_product.store_id:
             self.data["lines"] = {}
         self.data["store_id"] = store_product.store_id
         key = f"{store_product.id}:{variant.id}"
+        if separate_line:
+            # Group stores name a recipient per line, so the same hoodie ordered for a second
+            # child stays its own row instead of bumping the first one's quantity.
+            key = f"{key}:{secrets.token_hex(3)}"
         line = self.data["lines"].setdefault(key, {"sp": store_product.id, "v": variant.id, "qty": 0})
         line["qty"] += qty
         self.save()
+
+    def set_label(self, key, label):
+        """Record who a line is for. Ignored for lines that aren't in the cart any more."""
+        if key in self.data["lines"]:
+            self.data["lines"][key]["label"] = label.strip()[:120]
+            self.save()
 
     def set_qty(self, key, qty):
         if key in self.data["lines"]:
@@ -57,6 +68,7 @@ class Cart:
             unit = sp.price + variant.upcharge
             yield {
                 "key": key, "store_product": sp, "variant": variant, "qty": line["qty"],
+                "label": line.get("label", ""),
                 "unit_price": unit, "line_total": unit * line["qty"],
             }
 

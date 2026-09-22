@@ -48,6 +48,11 @@ class Order(models.Model):
     )
 
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    delivery_fee = models.DecimalField(
+        max_digits=8, decimal_places=2, default=0,
+        help_text="Delivery charged to this buyer, snapshotted at checkout. Group ship only; "
+                  "a group-delivery drop-off is billed to the organization instead.",
+    )
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     stripe_checkout_session = models.CharField(max_length=100, blank=True)
     stripe_payment_intent = models.CharField(max_length=100, blank=True)
@@ -76,7 +81,7 @@ class Order(models.Model):
 
     def recalculate(self):
         self.subtotal = sum((i.line_total for i in self.items.all()), start=0)
-        self.total = self.subtotal
+        self.total = self.subtotal + self.delivery_fee
         self.save(update_fields=["subtotal", "total", "updated_at"])
 
 
@@ -91,6 +96,11 @@ class OrderItem(models.Model):
     sku = models.CharField(max_length=40)
     quantity = models.PositiveIntegerField(default=1)
     unit_price = models.DecimalField(max_digits=8, decimal_places=2)
+    recipient_label = models.CharField(
+        max_length=120, blank=True,
+        help_text="Who this line is for, e.g. 'Ava – 5th grade'. Collected per line in group "
+                  "stores, where one buyer often orders for several children.",
+    )
 
     def __str__(self):
         return f"{self.quantity} × {self.product_name} {self.variant_label}".strip()

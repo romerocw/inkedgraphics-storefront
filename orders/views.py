@@ -22,7 +22,7 @@ def cart_add(request, slug):
         qty = max(1, int(request.POST.get("quantity", 1)))
     except ValueError:
         qty = 1
-    Cart(request).add(sp, variant, qty)
+    Cart(request).add(sp, variant, qty, separate_line=store.is_group)
     messages.success(request, f"Added {qty} × {sp.name} ({variant.color} {variant.size}) to your cart.")
     return redirect("cart")
 
@@ -30,19 +30,30 @@ def cart_add(request, slug):
 def cart_view(request):
     cart = Cart(request)
     store = Store.objects.filter(id=cart.store_id).first() if cart.store_id else None
-    return render(request, "orders/cart.html", {"cart": cart, "items": list(cart.items()), "store": store, "brand": store.client if store else None})
+    fee = store.buyer_delivery_fee if store else 0
+    return render(request, "orders/cart.html", {
+        "cart": cart, "items": list(cart.items()), "store": store,
+        "brand": store.client if store else None,
+        "delivery_fee": fee, "order_total": cart.total() + fee,
+    })
 
 
 @require_POST
 def cart_update(request):
     cart = Cart(request)
     for key, value in request.POST.items():
+        if key.startswith("label:"):
+            cart.set_label(key[6:], value)
+    # Labels first: setting a quantity to zero drops the line, and there's no point recording
+    # who a line was for after it's gone.
+    for key, value in request.POST.items():
         if key.startswith("qty:"):
             try:
                 cart.set_qty(key[4:], int(value or 0))
             except ValueError:
                 pass
-    return redirect("cart")
+    # The cart is one form, so "Checkout" saves the labels the buyer just typed on the way.
+    return redirect("checkout" if "checkout" in request.POST else "cart")
 
 
 def checkout(request):
@@ -51,11 +62,16 @@ def checkout(request):
     if not items:
         return redirect("cart")
     store = get_object_or_404(Store, id=cart.store_id, status=Store.Status.OPEN)
-    form = CheckoutForm(request.POST or None)
+    if store.is_group and any(not i["label"] for i in items):
+        # The pack-out list is grouped by these, so an unlabelled line can't be sorted on the floor.
+        messages.error(request, "Please say who each item is for before checking out.")
+        return redirect("cart")
+    form = CheckoutForm(request.POST or None, store=store)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             order = form.save(commit=False)
             order.store = store
+            order.delivery_fee = store.buyer_delivery_fee
             # Snapshot the promise this buyer was just shown; the store's own dates move on.
             arrival = estimated_arrival(store)
             if arrival:
@@ -64,13 +80,17 @@ def checkout(request):
             for i in items:
                 OrderItem.objects.create(
                     order=order, store_product=i["store_product"], variant=i["variant"],
-                    quantity=i["qty"], unit_price=i["unit_price"],
+                    quantity=i["qty"], unit_price=i["unit_price"], recipient_label=i["label"],
                 )
             order.recalculate()
         request.session.setdefault("my_orders", []).append(order.order_number)
         request.session.modified = True
         return redirect("order_pay", order_number=order.order_number)
-    return render(request, "orders/checkout.html", {"form": form, "items": items, "cart": cart, "store": store, "brand": store.client})
+    fee = store.buyer_delivery_fee
+    return render(request, "orders/checkout.html", {
+        "form": form, "items": items, "cart": cart, "store": store, "brand": store.client,
+        "delivery_fee": fee, "order_total": cart.total() + fee,
+    })
 
 
 def _my_order(request, order_number):

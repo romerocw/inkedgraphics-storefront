@@ -1,3 +1,4 @@
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -50,6 +51,15 @@ class Store(models.Model):
         OPEN = "open", "Open"
         CLOSED = "closed", "Closed"
 
+    class Fulfillment(models.TextChoices):
+        # Three genuinely different products, not two wordings of one. Shipping (either kind)
+        # is priced from ShipStation; delivery is us driving a few boxes to a local school.
+        INDIVIDUAL_SHIP = "individual_ship", "Ship to each buyer"
+        GROUP_SHIP = "group_ship", "Ship one consignment to the organization"
+        GROUP_DELIVERY = "group_delivery", "Deliver to the organization ourselves"
+
+    GROUP_MODES = (Fulfillment.GROUP_SHIP, Fulfillment.GROUP_DELIVERY)
+
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="stores")
     name = models.CharField(max_length=200)
     slug = models.SlugField(unique=True, help_text="Store URL path, e.g. store.inkedgraphics.com/<slug>/")
@@ -74,6 +84,29 @@ class Store(models.Model):
         null=True, blank=True,
         help_text="When an open store closes by itself, in the store's time zone. Blank = close it by hand.",
     )
+    fulfillment_mode = models.CharField(
+        max_length=20, choices=Fulfillment.choices, default=Fulfillment.INDIVIDUAL_SHIP,
+        help_text="How this store's orders reach their buyers.",
+    )
+    delivery_location_name = models.CharField(
+        max_length=200, blank=True,
+        help_text="Where a group order is handed over, e.g. 'Langley High front office'.",
+    )
+    delivery_address = models.TextField(
+        blank=True, help_text="Street address the whole group order goes to. Shown to buyers.",
+    )
+    delivery_contact_name = models.CharField(max_length=200, blank=True)
+    delivery_contact_phone = models.CharField(max_length=30, blank=True)
+    group_ship_fee = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        help_text="Flat delivery charge added to each buyer's order in a group-ship store. "
+                  "Quote it from ShipStation when setting the store up. Blank = charge nothing.",
+    )
+    group_delivery_fee = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        help_text="What the organization is billed for the whole drop-off. Never charged to "
+                  "buyers, never sent to Stripe. Blank = the site default.",
+    )
     production_lead_days = models.PositiveSmallIntegerField(
         null=True, blank=True,
         help_text="Business days to produce this store's order once it closes. Blank = the site default.",
@@ -94,6 +127,34 @@ class Store(models.Model):
 
     def __str__(self):
         return f"{self.client} — {self.name}"
+
+    @property
+    def is_group(self):
+        """True when the whole store goes to one place, however it gets there."""
+        return self.fulfillment_mode in self.GROUP_MODES
+
+    @property
+    def buyer_delivery_fee(self):
+        """What each buyer pays for delivery on top of their items.
+
+        Group ship only: one consignment still has to be paid for, and staff set that share
+        from a ShipStation quote. Group delivery is a single local drop-off billed to the
+        organization, so buyers are charged nothing; individual ship absorbs postage into the
+        item prices until live rates land.
+        """
+        if self.fulfillment_mode == self.Fulfillment.GROUP_SHIP and self.group_ship_fee:
+            # Coerced: an unsaved instance can still be holding whatever was assigned to it,
+            # and this gets added to cart totals.
+            return Decimal(str(self.group_ship_fee))
+        return Decimal("0")
+
+    @property
+    def organization_delivery_fee(self):
+        """What the organization is billed for the drop-off, or None if there's nothing to bill."""
+        if self.fulfillment_mode != self.Fulfillment.GROUP_DELIVERY:
+            return None
+        fee = self.group_delivery_fee
+        return Decimal(str(settings.DEFAULT_GROUP_DELIVERY_FEE)) if fee is None else fee
 
     @property
     def arrival(self):

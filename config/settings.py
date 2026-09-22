@@ -256,6 +256,10 @@ DEFAULT_ARRIVAL_BUFFER_DAYS = 4
 # "2026-11-27" for the Friday after Thanksgiving.
 BUSINESS_HOLIDAYS = []
 
+# What a local school is billed for one group-delivery drop-off — the whole order, a few
+# boxes, not per buyer. Billed to the organization, so it never reaches Stripe or a buyer.
+DEFAULT_GROUP_DELIVERY_FEE = 30
+
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")

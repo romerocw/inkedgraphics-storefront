@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone as dt_timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,7 +12,9 @@ from django.utils import timezone as dj_timezone
 
 from messaging.models import OutboxEmail
 from stores.arrival import estimated_arrival
-from stores.factories import make_client, make_offering, make_order, make_product, make_staff, make_store
+from stores.factories import (
+    make_client, make_group_store, make_offering, make_order, make_product, make_staff, make_store,
+)
 from stores.models import Store
 
 from .links import order_link_key, order_url
@@ -300,3 +303,200 @@ class ArrivalPromiseTests(TestCase):
         store = make_store(closes_at=None)
         make_offering(store, price="40.00")
         self.assertNotContains(self.client.get(reverse("store_detail", args=[store.slug])), "Arrives")
+
+
+class FulfillmentModeTests(TestCase):
+    """Three modes, priced three ways: nothing, a per-buyer share, and the school's own bill."""
+
+    def setUp(self):
+        self.individual = make_store(name="Ship To Me")
+        self.group_ship = make_group_store(Store.Fulfillment.GROUP_SHIP, group_ship_fee="6.50")
+        self.group_delivery = make_group_store(Store.Fulfillment.GROUP_DELIVERY)
+
+    def test_only_group_ship_charges_the_buyer(self):
+        self.assertEqual(self.individual.buyer_delivery_fee, Decimal("0"))
+        self.assertEqual(self.group_ship.buyer_delivery_fee, Decimal("6.50"))
+        self.assertEqual(self.group_delivery.buyer_delivery_fee, Decimal("0"))
+
+    def test_only_group_delivery_bills_the_organization(self):
+        self.assertIsNone(self.individual.organization_delivery_fee)
+        self.assertIsNone(self.group_ship.organization_delivery_fee)
+        self.assertEqual(self.group_delivery.organization_delivery_fee, Decimal("30"))
+
+    @override_settings(DEFAULT_GROUP_DELIVERY_FEE=45)
+    def test_the_drop_off_fee_falls_back_to_the_site_default(self):
+        self.assertEqual(self.group_delivery.organization_delivery_fee, Decimal("45"))
+        self.group_delivery.group_delivery_fee = Decimal("20.00")
+        self.assertEqual(self.group_delivery.organization_delivery_fee, Decimal("20.00"))
+
+    def test_group_modes_are_grouped_and_individual_is_not(self):
+        self.assertFalse(self.individual.is_group)
+        self.assertTrue(self.group_ship.is_group)
+        self.assertTrue(self.group_delivery.is_group)
+
+
+class GroupCheckoutTests(TestCase):
+    """One buyer, several children: each line carries its own name all the way through."""
+
+    def setUp(self):
+        self.store = make_group_store(Store.Fulfillment.GROUP_DELIVERY)
+        self.hoodie = make_offering(self.store, make_product(name="Hoodie", variants=(("Navy", "M"),)), price="40.00")
+
+    def add(self, qty=1):
+        variant = self.hoodie.product.variants.first()
+        self.client.post(
+            reverse("cart_add", args=[self.store.slug]),
+            {"store_product": self.hoodie.pk, "variant": variant.pk, "quantity": qty},
+        )
+
+    def cart_keys(self):
+        return list(self.client.session["cart"]["lines"])
+
+    def label_all(self, *labels, **extra):
+        keys = self.cart_keys()
+        data = {f"label:{key}": label for key, label in zip(keys, labels)}
+        data.update({f"qty:{key}": "1" for key in keys})
+        data.update(extra)
+        return self.client.post(reverse("cart_update"), data)
+
+    def checkout(self):
+        return self.client.post(
+            reverse("checkout"), {"buyer_name": "Pat O'Brien", "buyer_email": "pat@example.com"}
+        )
+
+    def test_the_same_item_added_twice_stays_two_labellable_lines(self):
+        self.add()
+        self.add()
+        self.assertEqual(len(self.cart_keys()), 2)
+
+    def test_an_individual_ship_store_still_merges_identical_lines(self):
+        store = make_store()
+        offering = make_offering(store, price="40.00")
+        variant = offering.product.variants.first()
+        for _ in range(2):
+            self.client.post(
+                reverse("cart_add", args=[store.slug]),
+                {"store_product": offering.pk, "variant": variant.pk, "quantity": 1},
+            )
+        (line,) = self.client.session["cart"]["lines"].values()
+        self.assertEqual(line["qty"], 2)
+
+    def test_labels_reach_the_order_lines(self):
+        self.add()
+        self.add()
+        self.label_all("Ava – 5th grade", "Ben – 2nd grade")
+        self.checkout()
+
+        order = Order.objects.get()
+        self.assertEqual(
+            sorted(item.recipient_label for item in order.items.all()),
+            ["Ava – 5th grade", "Ben – 2nd grade"],
+        )
+
+    def test_checkout_is_refused_until_every_line_is_named(self):
+        self.add()
+        self.add()
+        self.label_all("Ava – 5th grade", "")
+
+        response = self.client.post(
+            reverse("checkout"), {"buyer_name": "Pat", "buyer_email": "pat@example.com"}, follow=True
+        )
+        self.assertContains(response, "who each item is for")
+        self.assertFalse(Order.objects.exists())
+
+    def test_the_checkout_button_saves_the_labels_on_its_way(self):
+        self.add()
+        response = self.label_all("Ava – 5th grade", checkout="1")
+        self.assertRedirects(response, reverse("checkout"))
+        self.assertContains(self.client.get(reverse("checkout")), "Delivered to")
+
+    def test_a_group_store_asks_for_no_order_wide_recipient(self):
+        self.add()
+        self.label_all("Ava – 5th grade")
+        self.assertNotContains(self.client.get(reverse("checkout")), "Player / student name")
+
+    def test_the_delivery_address_is_shown_instead_of_a_shipping_form(self):
+        self.add()
+        self.label_all("Ava – 5th grade")
+        page = self.client.get(reverse("checkout"))
+        self.assertContains(page, "Langley High front office")
+        self.assertContains(page, "Nothing is shipped to you")
+
+    def test_group_delivery_adds_nothing_to_what_the_buyer_pays(self):
+        self.add()
+        self.label_all("Ava – 5th grade")
+        self.checkout()
+
+        order = Order.objects.get()
+        self.assertEqual(order.delivery_fee, Decimal("0"))
+        self.assertEqual(order.total, order.subtotal)
+
+    def test_the_confirmation_email_says_where_to_collect_it(self):
+        self.add()
+        self.label_all("Ava – 5th grade")
+        self.checkout()
+        mark_paid(Order.objects.get())
+
+        (email,) = OutboxEmail.objects.filter(kind="order_confirmation")
+        self.assertIn("Langley High front office", email.text_body)
+        self.assertIn("Ava – 5th grade", email.text_body)
+        self.assertIn("Ava – 5th grade", email.html_body)
+
+
+class GroupShipFeeTests(TestCase):
+    """Group ship charges each buyer a staff-set share of the consignment."""
+
+    def setUp(self):
+        self.store = make_group_store(Store.Fulfillment.GROUP_SHIP, group_ship_fee="6.50")
+        self.offering = make_offering(self.store, price="40.00")
+        variant = self.offering.product.variants.first()
+        self.client.post(
+            reverse("cart_add", args=[self.store.slug]),
+            {"store_product": self.offering.pk, "variant": variant.pk, "quantity": 2},
+        )
+        (key,) = self.client.session["cart"]["lines"]
+        self.client.post(reverse("cart_update"), {f"label:{key}": "Ava", f"qty:{key}": "2"})
+
+    def order(self):
+        self.client.post(reverse("checkout"), {"buyer_name": "Pat", "buyer_email": "pat@example.com"})
+        return Order.objects.get()
+
+    def test_the_fee_is_snapshotted_and_added_to_the_total(self):
+        order = self.order()
+        self.assertEqual(order.subtotal, Decimal("80.00"))
+        self.assertEqual(order.delivery_fee, Decimal("6.50"))
+        self.assertEqual(order.total, Decimal("86.50"))
+
+    def test_the_fee_survives_the_store_changing_its_mind(self):
+        order = self.order()
+        self.store.group_ship_fee = Decimal("99.00")
+        self.store.save(update_fields=["group_ship_fee"])
+        order.recalculate()
+        self.assertEqual(order.total, Decimal("86.50"))
+
+    def test_the_cart_and_checkout_show_the_fee(self):
+        for url in (reverse("cart"), reverse("checkout")):
+            self.assertContains(self.client.get(url), "6.50")
+
+    def test_the_fee_reaches_stripe_as_its_own_line(self):
+        order = self.order()
+        with patch("orders.payments.stripe.checkout.Session.create") as create:
+            create.return_value = SimpleNamespace(id="cs_1", url="https://stripe.test/pay")
+            self.client.get(reverse("order_pay", args=[order.order_number]))
+        names = [li["price_data"]["product_data"]["name"] for li in create.call_args.kwargs["line_items"]]
+        amounts = [li["price_data"]["unit_amount"] for li in create.call_args.kwargs["line_items"]]
+        self.assertIn("Delivery", names)
+        self.assertEqual(amounts[names.index("Delivery")], 650)
+
+    def test_an_individual_ship_order_sends_no_delivery_line(self):
+        store = make_store()
+        offering = make_offering(store, price="40.00")
+        order = make_order(store, status=Order.Status.PENDING, items=[(offering, 1)])
+        session = self.client.session
+        session["my_orders"] = [order.order_number]
+        session.save()
+        with patch("orders.payments.stripe.checkout.Session.create") as create:
+            create.return_value = SimpleNamespace(id="cs_1", url="https://stripe.test/pay")
+            self.client.get(reverse("order_pay", args=[order.order_number]))
+        names = [li["price_data"]["product_data"]["name"] for li in create.call_args.kwargs["line_items"]]
+        self.assertNotIn("Delivery", names)

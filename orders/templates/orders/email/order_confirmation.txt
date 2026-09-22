@@ -5,15 +5,23 @@ Thanks for your order from {{ store.name }}. Your payment went through and your 
 Order number: {{ order.order_number }}
 {% if order.recipient_name %}Items are for: {{ order.recipient_name }}
 {% endif %}
-{% for item in items %}{{ item.quantity }} x {{ item.product_name }}{% if item.variant_label %} ({{ item.variant_label }}){% endif %} — ${{ item.line_total|floatformat:2 }}
-{% endfor %}
+{% for item in items %}{{ item.quantity }} x {{ item.product_name }}{% if item.variant_label %} ({{ item.variant_label }}){% endif %}{% if item.recipient_label %} — for {{ item.recipient_label }}{% endif %} — ${{ item.line_total|floatformat:2 }}
+{% endfor %}{% if order.delivery_fee %}Delivery: ${{ order.delivery_fee|floatformat:2 }}
+{% endif %}
 Total paid: ${{ order.total|floatformat:2 }}
 
 What happens next
 {% if store.closes_at %}The store closes on {{ store.closes_local|date:"F j, Y" }} at {{ store.closes_local|date:"g:i a T" }}.{% else %}The store will close at the end of the ordering period.{% endif %} Items are produced after the store closes, then delivered the way {{ store.client.name }} has arranged for this store.
 {% if arrival %}
 Arrives {{ arrival.label }}.
-{% endif %}
+{% endif %}{% if store.is_group %}
+Where to collect it
+Nothing is shipped to you. The whole order is delivered to {{ store.delivery_location_name|default:store.client.name }}{% if store.delivery_address %}:
+
+{{ store.delivery_address }}
+{% endif %}{% if store.delivery_contact_name %}
+Ask for {{ store.delivery_contact_name }}{% if store.delivery_contact_phone %} ({{ store.delivery_contact_phone }}){% endif %}.
+{% endif %}{% endif %}
 
 View your order:
 {{ order_url }}
