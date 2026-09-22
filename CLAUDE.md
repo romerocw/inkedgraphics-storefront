@@ -72,6 +72,23 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   Live ShipStation rates are deliberately not built: they need a buyer postal address (checkout
   collects none) and package weight (the catalog has no physical attributes), so they wait on
   the synced catalog models.
+- **Share kit.** `stores/services/share_kit.py` builds a store's QR (PNG + SVG), US Letter
+  flyer (ReportLab), 1080x1080 social image (Pillow) and the copy-paste text. The console
+  calls `generate()` and the future client portal will call the same function — neither owns
+  the logic. `fingerprint()` hashes only what's printed, so `lifecycle_tick` can offer every
+  open store a rebuild each run and do nothing unless something moved; it sweeps **open**
+  stores only, because a closed store's arrival promise is recomputed from today and its
+  fingerprint would drift daily. Generation failures are caught per store and counted in the
+  tick's summary line, so a bad logo never looks like a dead cron. `manage.py
+  generate_share_kits [--store slug] [--force]` is the manual wrapper.
+  Typefaces come from the Bitstream Vera files inside reportlab — don't commit a font or rely
+  on the server having one. Assets live under `stores/<slug>/share/`; regeneration deletes the
+  old file first, since storage never overwrites and would otherwise pile up suffixed copies.
+- The buyer store page carries Open Graph tags so a pasted link renders as a card. The image is
+  served by `stores.views.share_image` at `/<slug>/share-image.png`, never a media URL: those
+  are signed and expire in an hour, and a shared link is re-scraped days later.
+- Tests that write files use `TempMediaMixin` from `stores/factories.py`, or the suite litters
+  the project's `media/` directory.
 - Staff never use `/django-admin/`; anything staff need goes in `console/`.
 - Static files use ManifestStaticFilesStorage when `DEBUG` is off (plain storage in dev/tests,
   which have no manifest): after template/CSS changes, rebuild Tailwind and run collectstatic
