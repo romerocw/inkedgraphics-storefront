@@ -3,6 +3,9 @@
 Django 6 app for private-labeled group stores (schools, teams, businesses). Buyers shop a
 time-limited store, pay via Stripe Checkout; staff manage clients/stores in a console.
 
+Integration contract with the other system: see `docs/ops-storefront-api.md`. Do not change
+the contract without updating this file in both repos.
+
 ## Layout
 - `config/` settings, urls, health-check middleware (`/health/`)
 - `stores/` Client, Store, StoreStatusChange, public store pages, base templates;
