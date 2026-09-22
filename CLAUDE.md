@@ -55,6 +55,23 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   Checkout snapshots the range onto `Order.promised_arrival_earliest`/`_latest` the way line
   prices are snapshotted — the confirmation email leaves the outbox after the store has closed
   and must quote what that buyer was shown, so read `order.promised_arrival`, not the store's.
+- **Fulfillment.** `Store.fulfillment_mode` has three values, and they are three different
+  products: `individual_ship` (to each buyer, postage absorbed into item prices),
+  `group_ship` (one consignment to the organization; each buyer pays a flat share staff quote
+  from ShipStation into `group_ship_fee`) and `group_delivery` (we drive a few boxes to a local
+  school — one flat fee for the whole drop-off, billed to the organization, never charged to a
+  buyer and never sent to Stripe). `store.is_group` covers the last two; ask
+  `store.buyer_delivery_fee` and `store.organization_delivery_fee` rather than reading the mode
+  inline. A flat per-store fee can never be charged per buyer: while a store is open there's no
+  way to know how many buyers will split it.
+  Group stores collect `OrderItem.recipient_label` per cart line, so identical items stay
+  separate rows there (individual ship still merges them); checkout refuses until every line is
+  named. `Order.delivery_fee` is snapshotted at checkout like the line prices, becomes its own
+  Stripe line item, and is written by `recalculate()` alongside the total.
+  Console "Revenue" sums `subtotal`, not `total`, so delivery never inflates it.
+  Live ShipStation rates are deliberately not built: they need a buyer postal address (checkout
+  collects none) and package weight (the catalog has no physical attributes), so they wait on
+  the synced catalog models.
 - Staff never use `/django-admin/`; anything staff need goes in `console/`.
 - Static files use ManifestStaticFilesStorage when `DEBUG` is off (plain storage in dev/tests,
   which have no manifest): after template/CSS changes, rebuild Tailwind and run collectstatic
@@ -67,7 +84,10 @@ time-limited store, pay via Stripe Checkout; staff manage clients/stores in a co
   requires a note to cancel, logs an `OrderStatusChange`, and never touches amounts.
 - Console order lists (global and per-store) share `console.views.filter_orders()`; the ops CSV
   uses it too, so filters stay consistent. That CSV's column order is what staff hand-key from —
-  don't reorder it, and keep the utf-8-sig BOM so Excel opens it cleanly.
+  don't reorder it (new columns go on the end), and keep the utf-8-sig BOM so Excel opens it cleanly.
+- The console store page's Pack-out tab (group stores only) gathers every paid item under its
+  `recipient_label` via `console.views.packout_groups()`, printable: printing hides the console
+  chrome with Tailwind `print:` utilities rather than rendering a second page.
 - Blank `ProductVariant.sku` is filled from `<sku_prefix>-<COLOR>-<SIZE>` by `console.forms.unique_sku()`.
 - Tests use the builders in `stores/factories.py` (`make_owner`, `make_manager`, `make_staff`, …).
 
