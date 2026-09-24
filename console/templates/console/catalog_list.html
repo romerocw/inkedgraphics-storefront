@@ -1,0 +1,67 @@
+{% extends "console/base.html" %}
+{% block title %}Catalog{% endblock %}
+{% block content %}
+<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Catalog</h1>
+    <p class="muted text-sm">
+      {{ total }} style{{ total|pluralize }} from the production system.
+      {% if sync.last_finished_at %}Last refreshed {{ sync.last_finished_at|timesince }} ago.
+      {% else %}Never refreshed on this server.{% endif %}
+    </p>
+    {% if sync.last_error %}<p class="mt-1 text-sm text-red-700">Last attempt failed: {{ sync.last_error }}</p>{% endif %}
+  </div>
+  <form method="post" action="{% url 'console:catalog_refresh' %}" class="flex items-center gap-2">
+    {% csrf_token %}
+    <button type="submit" class="btn">Refresh now</button>
+    <button type="submit" name="full" value="1" class="btn btn-secondary">Full refresh</button>
+  </form>
+</div>
+
+<p class="muted mb-4 text-sm">
+  These come from the production system and can't be edited here — it mints the styles and SKUs.
+  To sell one, open a store and add it on the Products tab.
+</p>
+
+<form method="get" class="mb-4 flex flex-wrap items-center gap-2">
+  <input type="search" name="q" value="{{ query }}" placeholder="Style code, brand, category" class="input max-w-sm">
+  <select name="active" class="input w-auto">
+    <option value="">For sale</option>
+    <option value="0"{% if active == "0" %} selected{% endif %}>Archived by production</option>
+    <option value="all"{% if active == "all" %} selected{% endif %}>Everything</option>
+  </select>
+  <button type="submit" class="btn btn-secondary">Search</button>
+  {% if query or active %}<a href="{% url 'console:catalog' %}" class="muted hover:underline">Clear</a>{% endif %}
+</form>
+
+<table class="cart">
+  <tr><th>Product</th><th>Style</th><th>Colours</th><th>Our cost</th><th>In stores</th><th></th></tr>
+  {% for blank in object_list %}
+  <tr{% if not blank.is_active %} class="opacity-60"{% endif %}>
+    <td>
+      {{ blank.buyer_name }}
+      {% if not blank.is_active %}<span class="muted text-xs">· archived</span>{% endif %}
+      {% if blank.category %}<br><span class="muted text-xs">{{ blank.category }}</span>{% endif %}
+    </td>
+    <td>{{ blank.supplier_style_code }}</td>
+    <td>{{ blank.variants.count }} size/colour options</td>
+    <td>{% if blank.base_cost %}${{ blank.base_cost|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td>{% if blank.used_by %}{{ blank.used_by }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="muted text-xs">{{ blank.ops_updated_at|date:"M j, Y" }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="muted">
+    {% if query %}Nothing matches "{{ query }}".
+    {% else %}Nothing synced yet. Press "Full refresh", or run <code>manage.py sync_catalog</code>.{% endif %}
+  </td></tr>
+  {% endfor %}
+</table>
+
+{% if page_obj.has_other_pages %}
+<p class="muted mt-4 text-sm">
+  Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} ·
+  {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}&q={{ query }}" class="text-brand hover:underline">Previous</a>{% endif %}
+  {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}&q={{ query }}" class="text-brand hover:underline">Next</a>{% endif %}
+</p>
+{% endif %}
+{% endblock %}

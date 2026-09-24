@@ -27,43 +27,113 @@
 <p class="muted mb-4">This store has nothing for sale yet. Pick products below to add them.</p>
 {% endif %}
 
-<h2 class="mt-8 mb-2 text-lg font-semibold">Add products to this store</h2>
-<form method="get" class="mb-3 flex items-center gap-2">
-  <input type="hidden" name="tab" value="products">
-  <input type="search" name="q" value="{{ blank_query }}" placeholder="Search the ops catalog — style code, brand, category" class="input max-w-md">
-  <button type="submit" class="btn btn-secondary">Search</button>
-  {% if blank_query %}<a href="?tab=products" class="muted hover:underline">Clear</a>{% endif %}
-</form>
-{% if add_form.products %}
-<form method="post" action="{% url 'console:store_products_add' store.pk %}">{% csrf_token %}
+<h2 class="mt-8 mb-2 text-lg font-semibold">Add a product to this store</h2>
+
+{% if add_form and picked_blank %}
+<form method="post" action="{% url 'console:store_products_add' store.pk %}" enctype="multipart/form-data" class="card max-w-2xl">
+  {% csrf_token %}
+  <input type="hidden" name="style" value="{{ picked_blank.pk }}">
+  <div class="mb-4 flex items-baseline justify-between gap-3">
+    <div>
+      <h3 class="text-lg font-semibold">{{ picked_blank.buyer_name }}</h3>
+      <p class="muted text-sm">{{ picked_blank.supplier_style_code }}{% if picked_blank.category %} · {{ picked_blank.category }}{% endif %}</p>
+    </div>
+    <a href="?tab=products" class="muted text-sm hover:underline">Choose a different product</a>
+  </div>
   {% if add_form.non_field_errors %}<div class="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ add_form.non_field_errors }}</div>{% endif %}
-  <table class="cart">
-    <tr>
-      <th class="w-10"><input type="checkbox" id="check-all" aria-label="Select every product"></th>
-      <th>Blank</th><th>Our cost</th><th>Price buyers pay</th>
-    </tr>
-    {% for row in add_form.rows %}
-    <tr>
-      <td>{{ row.add }}</td>
-      <td>{{ row.product.buyer_name }}<br><span class="muted text-xs">{{ row.product.supplier_style_code }}{% if row.product.category %} · {{ row.product.category }}{% endif %} · {{ row.product.variants.count }} size/color options</span></td>
-      <td class="muted">{% if row.product.base_cost %}${{ row.product.base_cost|floatformat:2 }}{% else %}—{% endif %}</td>
-      <td>{{ row.price }}{% for e in row.price.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}</td>
-    </tr>
+
+  <p class="label">Which colours does this store sell?</p>
+  <div class="mb-1 flex flex-wrap gap-2">
+    {% for swatch in add_form.swatches %}
+    <label class="flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm has-[:checked]:border-brand has-[:checked]:bg-gray-50">
+      {{ swatch.box.tag }}
+      <span class="inline-block h-5 w-5 shrink-0 rounded-full border border-gray-300" style="background:{{ swatch.hex|default:'#e5e7eb' }}"></span>
+      {{ swatch.name }}
+    </label>
     {% endfor %}
-  </table>
-  <div class="mt-3 flex items-center gap-3">
-    <button type="submit" name="add_selected" class="btn">Add selected</button>
-    <button type="submit" name="add_all" class="btn btn-secondary">Add all</button>
+  </div>
+  {% for e in add_form.colors.errors %}<p class="mb-2 text-sm text-red-700">{{ e }}</p>{% endfor %}
+
+  <p class="label mt-4">Which sizes?</p>
+  <div class="mb-1 flex flex-wrap gap-2">
+    {% for box in add_form.sizes %}
+    <label class="cursor-pointer rounded-md border border-gray-300 px-3 py-2 text-sm has-[:checked]:border-brand has-[:checked]:bg-gray-50">
+      {{ box.tag }} {{ box.choice_label }}
+    </label>
+    {% endfor %}
+  </div>
+  <p class="muted mb-1 text-xs"><button type="button" id="all-sizes" class="underline">Select every size</button></p>
+  {% for e in add_form.sizes.errors %}<p class="mb-2 text-sm text-red-700">{{ e }}</p>{% endfor %}
+
+  {% for field in add_form %}{% if field.name != "colors" and field.name != "sizes" %}
+  <div class="mt-4">
+    <label for="{{ field.id_for_label }}" class="label">{{ field.label }}</label>
+    {{ field }}
+    {% if field.help_text %}<p class="muted mt-1 text-xs">{{ field.help_text }}</p>{% endif %}
+    {% for e in field.errors %}<p class="mt-1 text-sm text-red-700">{{ e }}</p>{% endfor %}
+  </div>
+  {% endif %}{% endfor %}
+
+  <div class="mt-6 flex items-center gap-3">
+    <button type="submit" class="btn">Add to store</button>
+    <a href="?tab=products" class="muted hover:underline">Cancel</a>
   </div>
 </form>
 <script>
-  document.getElementById("check-all").addEventListener("change", function () {
-    document.querySelectorAll('input[type=checkbox][name^="add_"]').forEach(function (box) { box.checked = this.checked; }, this);
+  document.getElementById("all-sizes").addEventListener("click", function () {
+    document.querySelectorAll('input[name="sizes"]').forEach(function (box) { box.checked = true; });
   });
 </script>
+
 {% else %}
-<p class="muted">
-  {% if blank_query %}Nothing in the ops catalog matches "{{ blank_query }}" that isn't already in this store.
-  {% else %}No blanks to add. Run <code>manage.py sync_catalog</code>, or everything active is already in this store.{% endif %}
-</p>
+<p class="muted mb-2 text-sm">Start typing a product name, brand or style code.</p>
+<div class="max-w-2xl">
+  <input type="search" id="blank-search" class="input" autocomplete="off"
+         placeholder="e.g. hoodie, Comfort Colors, CC1567" aria-label="Search the product catalog">
+  <ul id="blank-results" class="mt-2 space-y-1"></ul>
+  <p id="blank-empty" class="muted mt-2 text-sm" hidden>Nothing matches that. Try a shorter word.</p>
+</div>
+<script>
+// Type-ahead over the synced catalog. Whoever sets a store up shouldn't have to scroll a
+// couple of hundred styles to find the hoodie they already have in mind.
+(function () {
+  const input = document.getElementById("blank-search");
+  const list = document.getElementById("blank-results");
+  const empty = document.getElementById("blank-empty");
+  const search = "{% url 'console:catalog_search' %}";
+  let timer, lastQuery = null;
+
+  function draw(rows) {
+    list.innerHTML = "";
+    empty.hidden = rows.length > 0;
+    rows.forEach(function (row) {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = "?tab=products&style=" + row.id;
+      link.className = "flex items-center gap-3 rounded-md border border-gray-200 px-3 py-2 hover:border-brand hover:bg-gray-50";
+      const dots = (row.colors || []).filter(Boolean).map(function (hex) {
+        return '<span class="inline-block h-4 w-4 rounded-full border border-gray-300" style="background:' + hex + '"></span>';
+      }).join("");
+      link.innerHTML = '<span class="flex-1"><span class="font-medium">' + row.name +
+        '</span><br><span class="text-xs text-gray-500">' + row.detail + "</span></span>" +
+        '<span class="flex gap-1">' + dots + "</span>";
+      item.appendChild(link);
+      list.appendChild(item);
+    });
+  }
+
+  function run() {
+    const query = input.value.trim();
+    if (query === lastQuery) return;
+    lastQuery = query;
+    fetch(search + "?store={{ store.pk }}&q=" + encodeURIComponent(query), {headers: {"Accept": "application/json"}})
+      .then(function (r) { return r.json(); })
+      .then(function (data) { draw(data.results || []); })
+      .catch(function () { empty.hidden = false; });
+  }
+
+  input.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(run, 200); });
+  run();  // show something before a key is pressed, so the box never looks broken
+})();
+</script>
 {% endif %}

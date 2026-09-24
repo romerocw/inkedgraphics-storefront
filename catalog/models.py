@@ -80,6 +80,11 @@ class StoreProduct(models.Model):
         help_text="Shown to buyers. Ops' supplier images are missing for most styles.",
     )
     price = models.DecimalField(max_digits=8, decimal_places=2)
+    offered_variants = models.ManyToManyField(
+        "BlankVariant", blank=True, related_name="offered_in",
+        help_text="The colours and sizes this store sells. Empty means every active variant, "
+                  "which is almost never what a school store wants.",
+    )
     size_upcharges = models.JSONField(
         default=dict, blank=True,
         help_text='What buyers pay extra for a size, e.g. {"2XL": "2.00"}. Empty = the site default. '
@@ -117,8 +122,24 @@ class StoreProduct(models.Model):
         return self.blank.buyer_name if self.blank_id else self.product.name
 
     def variants(self):
-        """The sizes and colours a buyer can pick, whichever catalog backs this."""
+        """The colours and sizes a buyer can pick.
+
+        The chosen subset when there is one: a blank can carry a couple of hundred variants,
+        and a school store sells a handful of them. Falls back to everything active, which is
+        what legacy products do and what a blank does before anyone has narrowed it.
+        """
+        if self.blank_id and self.pk:
+            chosen = self.offered_variants.filter(is_active=True)
+            if chosen.exists():
+                return chosen
         return self.source.variants.filter(is_active=True)
+
+    def colors(self):
+        """Distinct colours of the blank, each with its hex, for the picker's swatches."""
+        seen = {}
+        for variant in self.source.variants.filter(is_active=True):
+            seen.setdefault(variant.color_name, variant.color_hex)
+        return [{"name": name, "hex": hex_value} for name, hex_value in seen.items()]
 
     def upcharge_for(self, size):
         """What a buyer pays on top of `price` for this size. Blank map = the site default."""

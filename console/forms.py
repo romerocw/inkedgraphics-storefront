@@ -280,45 +280,80 @@ class ConsoleStoreProductForm(StyledForm):
 StoreProductFormSet = forms.modelformset_factory(StoreProduct, form=ConsoleStoreProductForm, extra=0)
 
 
-class AddStoreProductsForm(StyledFieldsMixin, forms.Form):
-    """Checkbox + retail price per blank a store doesn't offer yet.
+class PickBlankForm(StyledFieldsMixin, forms.Form):
+    """Set up one blank for one store: what it's called, what it costs, which colours and sizes.
 
-    The price is required: the ops catalog carries what a blank costs us, never what a buyer
-    should pay, so there is no sensible number to pre-fill.
+    Colours and sizes are picked separately and crossed, because that is how someone thinks
+    about a school store — "the green one, youth small through adult 2XL" — rather than by
+    ticking two hundred individual variants.
     """
 
-    def __init__(self, *args, products=(), **kwargs):
-        super().__init__(*args, **kwargs)
-        self.products = list(products)
-        for blank in self.products:
-            self.fields[f"add_{blank.pk}"] = forms.BooleanField(required=False, label=blank.buyer_name)
-            self.fields[f"price_{blank.pk}"] = forms.DecimalField(
-                max_digits=8, decimal_places=2, min_value=0, required=False,
-                label=f"Price for {blank.buyer_name}",
-            )
-        for field in self.fields.values():
-            if isinstance(field, forms.DecimalField):
-                field.widget.attrs["class"] = INPUT
+    display_name = forms.CharField(
+        max_length=200, required=False, label="Name buyers see",
+        help_text="Leave blank to use the catalog name.",
+    )
+    price = forms.DecimalField(
+        max_digits=8, decimal_places=2, min_value=0, label="Price buyers pay",
+        help_text="Before any size surcharge.",
+    )
+    description = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 3}), required=False, label="Description (optional)",
+    )
+    image = forms.ImageField(
+        required=False, label="Photo (optional)",
+        help_text="Your own photo. The supplier's images are missing for most styles.",
+    )
 
-    def rows(self):
-        for blank in self.products:
-            yield {"product": blank, "add": self[f"add_{blank.pk}"], "price": self[f"price_{blank.pk}"]}
+    def __init__(self, *args, blank=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.blank = blank
+        self.variants = list(blank.variants.filter(is_active=True)) if blank else []
+        self.fields["colors"] = forms.MultipleChoiceField(
+            choices=[(c, c) for c in self.color_names()], widget=forms.CheckboxSelectMultiple,
+            label="Colours this store sells",
+        )
+        self.fields["sizes"] = forms.MultipleChoiceField(
+            choices=[(s, s) for s in self.size_names()], widget=forms.CheckboxSelectMultiple,
+            label="Sizes this store sells",
+        )
+        self.fields["display_name"].initial = blank.buyer_name if blank else ""
+
+    def color_names(self):
+        seen = []
+        for variant in self.variants:
+            if variant.color_name not in seen:
+                seen.append(variant.color_name)
+        return seen
+
+    def size_names(self):
+        ordered = sorted(self.variants, key=lambda v: (v.size_sort_order or 0, v.size))
+        seen = []
+        for variant in ordered:
+            if variant.size and variant.size not in seen:
+                seen.append(variant.size)
+        return seen
+
+    def swatches(self):
+        """(colour, hex, checkbox) so the template can show a real colour next to each box."""
+        hexes = {v.color_name: v.color_hex for v in self.variants}
+        for box in self["colors"]:
+            yield {"name": box.data["value"], "hex": hexes.get(box.data["value"], ""), "box": box}
+
+    def chosen_variants(self):
+        """The variants the picked colours and sizes actually cross to."""
+        colors = set(self.cleaned_data["colors"])
+        sizes = set(self.cleaned_data["sizes"])
+        return [v for v in self.variants if v.color_name in colors and v.size in sizes]
 
     def clean(self):
         cleaned = super().clean()
-        for blank in self.products:
-            if cleaned.get(f"add_{blank.pk}") and cleaned.get(f"price_{blank.pk}") is None:
-                self.add_error(f"price_{blank.pk}", "Set the price buyers pay for this.")
+        if cleaned.get("colors") and cleaned.get("sizes") and not self.chosen_variants():
+            # e.g. a youth colour that only comes in youth sizes, crossed with adult sizes.
+            raise ValidationError(
+                "That combination of colours and sizes doesn't exist for this product. "
+                "Pick colours and sizes that go together."
+            )
         return cleaned
-
-    def chosen(self, everything=False):
-        """(blank, price) pairs staff asked for. Priced blanks only."""
-        for blank in self.products:
-            price = self.cleaned_data.get(f"price_{blank.pk}")
-            if price is None:
-                continue
-            if everything or self.cleaned_data.get(f"add_{blank.pk}"):
-                yield blank, price
 
 
 class OrderFilterForm(StyledFieldsMixin, forms.Form):

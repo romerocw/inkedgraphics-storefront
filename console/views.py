@@ -21,7 +21,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import Coalesce
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -36,6 +36,9 @@ from orders.emails import ORDER_CONFIRMATION, queue_order_confirmation
 from orders.models import Order, OrderItem, allowed_transitions, change_status
 from stores.lifecycle import record_manual_change, schedule_notes
 from stores.models import Client, Store
+from integrations.catalog_sync import sync_catalog
+from integrations.models import CatalogSyncState
+from integrations.ops_client import OpsClient, OpsError
 from stores.services import share_kit
 
 from .invitations import InvitationInvalid, send_invitation, user_from_token
@@ -43,7 +46,7 @@ from .mail import site_url
 from .models import StaffProfile, profile_for
 from .permissions import can_edit, can_manage_team, can_set_active
 from .forms import (
-    AddStoreProductsForm,
+    PickBlankForm,
     ClientForm,
     ConsoleAuthenticationForm,
     ConsolePasswordChangeForm,
@@ -346,35 +349,24 @@ class StoreDetailMixin(StaffRequiredMixin):
         if ctx["tab"] == "summary":
             ctx["status_history"] = store.status_changes.select_related("changed_by").order_by("-changed_at", "-pk")[:10]
         if ctx["tab"] == "products":
-            offerings = store.offerings.select_related("product").order_by("sort_order", "pk")
+            offerings = store.offerings.select_related("product", "blank").order_by("sort_order", "pk")
             ctx["formset"] = formset if formset is not None else StoreProductFormSet(queryset=offerings)
-            query = self.request.GET.get("q", "")
-            ctx["blank_query"] = query
-            ctx["add_form"] = (
-                add_form if add_form is not None
-                else AddStoreProductsForm(products=self.candidates(store, query))
-            )
+            # ?style=<id> means a blank has been picked from the search: show its colours and
+            # sizes so staff can say what this store actually sells.
+            picked = self.picked_blank()
+            ctx["picked_blank"] = picked
+            if add_form is not None:
+                ctx["add_form"] = add_form
+                ctx["picked_blank"] = add_form.blank
+            elif picked:
+                ctx["add_form"] = PickBlankForm(blank=picked)
         return ctx
 
-    CANDIDATE_LIMIT = 50
-
-    def candidates(self, store, query=""):
-        """Active blanks this store doesn't offer yet, narrowed by the search box.
-
-        The ops catalog runs to a couple of hundred styles, so this is a search rather than a
-        list: without a query it shows the first page-worth as a starting point.
-        """
-        blanks = Blank.objects.filter(is_active=True).exclude(store_offerings__store=store)
-        query = (query or "").strip()
-        if query:
-            blanks = blanks.filter(
-                Q(supplier_style_code__icontains=query)
-                | Q(merch_label__icontains=query)
-                | Q(brand__icontains=query)
-                | Q(display_title__icontains=query)
-                | Q(category__icontains=query)
-            )
-        return blanks[:self.CANDIDATE_LIMIT]
+    def picked_blank(self):
+        style = self.request.GET.get("style")
+        if not (style and str(style).isdigit()):
+            return None
+        return Blank.objects.filter(pk=style, is_active=True).first()
 
     def render_tab(self, store, tab, **kwargs):
         return render(self.request, "console/store_detail.html", self.tab_context(store, tab, **kwargs))
@@ -389,6 +381,102 @@ class StoreDetailView(StoreDetailMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(**self.tab_context(self.object, self.request.GET.get("tab", "summary")))
+
+
+class CatalogListView(StaffRequiredMixin, ListView):
+    """What the ops sync has pulled in. Read-only: ops owns these rows."""
+
+    template_name = "console/catalog_list.html"
+    paginate_by = 50
+
+    def get_queryset(self):
+        blanks = Blank.objects.prefetch_related("variants").annotate(
+            used_by=Count("store_offerings", distinct=True)
+        )
+        search = (self.request.GET.get("q") or "").strip()
+        if search:
+            blanks = blanks.filter(
+                Q(supplier_style_code__icontains=search)
+                | Q(merch_label__icontains=search)
+                | Q(brand__icontains=search)
+                | Q(display_title__icontains=search)
+                | Q(category__icontains=search)
+            )
+        if self.request.GET.get("active") == "0":
+            blanks = blanks.filter(is_active=False)
+        elif self.request.GET.get("active") != "all":
+            blanks = blanks.filter(is_active=True)
+        return blanks
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["sync"] = CatalogSyncState.load()
+        ctx["query"] = self.request.GET.get("q", "")
+        ctx["active"] = self.request.GET.get("active", "")
+        ctx["total"] = Blank.objects.count()
+        return ctx
+
+
+class CatalogRefreshView(StaffRequiredMixin, View):
+    """Pull the catalog now, rather than waiting for the next scheduled run."""
+
+    def post(self, request):
+        client = OpsClient()
+        if not client.is_configured:
+            messages.error(request, "The ops catalog API isn't configured on this server yet.")
+            return redirect("console:catalog")
+        try:
+            result = sync_catalog(client=client, full=request.POST.get("full") == "1")
+        except OpsError as exc:
+            messages.error(request, f"The catalog couldn't be refreshed: {exc}")
+        else:
+            messages.success(
+                request,
+                f"Catalog refreshed — {result.styles} style{'' if result.styles == 1 else 's'} checked, "
+                f"{result.created} new, {len(result.deactivated)} now inactive.",
+            )
+        return redirect("console:catalog")
+
+
+class CatalogSearchView(StaffRequiredMixin, View):
+    """Type-ahead over the synced catalog, for the store product picker."""
+
+    LIMIT = 12
+
+    @staticmethod
+    def color_dots(blank):
+        """One dot per colour, not per variant — a style has a row per colour and size."""
+        seen = []
+        for hex_value in blank.variants.filter(is_active=True).values_list("color_hex", flat=True):
+            if hex_value and hex_value not in seen:
+                seen.append(hex_value)
+        return seen[:6]
+
+    def get(self, request):
+        query = (request.GET.get("q") or "").strip()
+        store_id = request.GET.get("store")
+        blanks = Blank.objects.filter(is_active=True)
+        if store_id and str(store_id).isdigit():
+            blanks = blanks.exclude(store_offerings__store_id=store_id)
+        if query:
+            blanks = blanks.filter(
+                Q(supplier_style_code__icontains=query)
+                | Q(merch_label__icontains=query)
+                | Q(brand__icontains=query)
+                | Q(display_title__icontains=query)
+                | Q(category__icontains=query)
+            )
+        rows = [
+            {
+                "id": blank.pk,
+                "name": blank.buyer_name,
+                # display_title is supplier copy: fine for staff searching, never for a buyer.
+                "detail": " · ".join(p for p in (blank.supplier_style_code, blank.category) if p),
+                "colors": self.color_dots(blank),
+            }
+            for blank in blanks.prefetch_related("variants")[:self.LIMIT]
+        ]
+        return JsonResponse({"results": rows})
 
 
 class StoreShareKitView(StoreDetailMixin, View):
@@ -420,27 +508,34 @@ class StoreProductsView(StoreDetailMixin, View):
 
 
 class StoreProductsAddView(StoreDetailMixin, View):
-    """Adds catalog products to a store, either the checked ones or all of them."""
+    """Adds one blank to a store, with the colours and sizes that store sells."""
+
+    def blank_for(self, request):
+        return get_object_or_404(Blank, pk=request.GET.get("style") or request.POST.get("style"))
 
     def post(self, request, pk):
         store = self.get_store()
-        candidates = list(self.candidates(store, request.GET.get("q", "")))
-        add_form = AddStoreProductsForm(request.POST, products=candidates)
-        if not add_form.is_valid():
-            messages.error(request, "Nothing was added — please check the prices below.")
-            return self.render_tab(store, "products", add_form=add_form)
+        blank = self.blank_for(request)
+        form = PickBlankForm(request.POST, request.FILES, blank=blank)
+        if not form.is_valid():
+            return self.render_tab(store, "products", add_form=form)
 
-        next_sort = (store.offerings.aggregate(m=Max("sort_order"))["m"] or 0) + 1
-        added = []
-        for blank, price in add_form.chosen(everything="add_all" in request.POST):
-            StoreProduct.objects.create(store=store, blank=blank, price=price, sort_order=next_sort)
-            next_sort += 1
-            added.append(blank.buyer_name)
+        with transaction.atomic():
+            offering = StoreProduct.objects.create(
+                store=store, blank=blank,
+                display_name=form.cleaned_data["display_name"],
+                description=form.cleaned_data["description"],
+                image=form.cleaned_data["image"],
+                price=form.cleaned_data["price"],
+                sort_order=(store.offerings.aggregate(m=Max("sort_order"))["m"] or 0) + 1,
+            )
+            offering.offered_variants.set(form.chosen_variants())
 
-        if added:
-            messages.success(request, f"Added {len(added)} product{'' if len(added) == 1 else 's'} to {store.name}.")
-        else:
-            messages.error(request, "Tick the products you want to add, then press Add selected.")
+        messages.success(
+            request,
+            f"Added {offering.name} to {store.name} — "
+            f"{len(form.chosen_variants())} colour and size options.",
+        )
         return redirect(self.tab_url(store, "products"))
 
 

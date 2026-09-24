@@ -1,6 +1,14 @@
 {% extends "console/base.html" %}
 {% block title %}Products{% endblock %}
 {% block content %}
+<div class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+  <p class="font-semibold">This is the old hand-made catalog.</p>
+  <p class="mt-1 text-sm">
+    New products come from the production system — open a store and add them on its Products tab,
+    or browse <a href="{% url 'console:catalog' %}" class="underline">Catalog</a>. These pages exist
+    only to edit products a store was already selling before the sync.
+  </p>
+</div>
 <div class="mb-4 flex items-center justify-between">
   <h1 class="text-2xl font-bold">Products</h1>
   <a href="{% url 'console:product_new' %}" class="btn">New product</a>

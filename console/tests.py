@@ -3,11 +3,15 @@ import io
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from catalog.models import Product, ProductVariant
+from integrations.ops_client import OpsTemporaryError
+
+from catalog.models import Blank, Product, ProductVariant
 from orders.models import Order, OrderItem
 from stores.factories import (
     make_blank, make_blank_offering, make_client, make_group_store, make_offering, make_order,
@@ -71,57 +75,91 @@ class StoreProductsTests(TestCase):
     def products_url(self, tab="products"):
         return f"{reverse('console:store_detail', args=[self.store.pk])}?tab={tab}"
 
-    def test_add_panel_offers_only_active_blanks_not_yet_in_the_store(self):
+    def add_url(self):
+        return reverse("console:store_products_add", args=[self.store.pk])
+
+    def picker(self, blank):
+        # The test client replaces a path's query string with `data`, so both go in together.
+        return self.client.get(
+            reverse("console:store_detail", args=[self.store.pk]),
+            {"tab": "products", "style": blank.pk},
+        )
+
+    def test_the_picker_searches_the_catalog(self):
+        response = self.client.get(reverse("console:catalog_search"), {"q": "Tee"})
+        names = [row["name"] for row in response.json()["results"]]
+        self.assertIn("Tee", names)
+        self.assertNotIn("Hoodie", names)
+
+    def test_the_search_hides_blanks_this_store_already_sells(self):
         make_blank_offering(self.store, self.hoodie)
-        response = self.client.get(self.products_url())
-        self.assertEqual(list(response.context["add_form"].products), [self.tee])
+        response = self.client.get(reverse("console:catalog_search"), {"store": self.store.pk})
+        names = [row["name"] for row in response.json()["results"]]
+        self.assertNotIn("Hoodie", names)
+        self.assertIn("Tee", names)
 
-    def test_add_selected_products_with_given_prices(self):
-        response = self.client.post(
-            reverse("console:store_products_add", args=[self.store.pk]),
-            {"add_selected": "1", f"add_{self.tee.pk}": "on", f"price_{self.tee.pk}": "25.50"},
-            follow=True,
-        )
+    def test_the_search_leaves_out_archived_blanks(self):
+        response = self.client.get(reverse("console:catalog_search"), {"q": "Retired"})
+        self.assertEqual(response.json()["results"], [])
+
+    def test_picking_a_blank_shows_its_colours_and_sizes(self):
+        page = self.picker(self.tee)
+        self.assertContains(page, "Which colours does this store sell?")
+        self.assertContains(page, "Black")
+        self.assertContains(page, "2XL")
+        self.assertContains(page, 'value="{}"'.format(self.tee.pk))
+
+    def test_adding_records_only_the_chosen_colours_and_sizes(self):
+        blank = make_blank(merch_label="Big Tee", sizes=("S", "M", "2XL"))
+        response = self.client.post(self.add_url(), {
+            "style": blank.pk, "price": "25.50", "display_name": "",
+            "colors": ["Black"], "sizes": ["S", "M"],
+        }, follow=True)
+
         offering = self.store.offerings.get()
-        self.assertEqual((offering.blank, offering.price), (self.tee, Decimal("25.50")))
-        self.assertTrue(offering.is_active)
-        self.assertContains(response, "Added 1 product")
+        self.assertEqual((offering.blank, offering.price), (blank, Decimal("25.50")))
+        self.assertEqual(sorted(v.size for v in offering.variants()), ["M", "S"])
+        self.assertContains(response, "2 colour and size options")
 
-    def test_a_blank_cannot_be_added_without_a_retail_price(self):
-        # The ops catalog carries what a blank costs us, never what a buyer should pay, so
-        # there is nothing sensible to fall back to.
-        response = self.client.post(
-            reverse("console:store_products_add", args=[self.store.pk]),
-            {"add_selected": "1", f"add_{self.tee.pk}": "on", f"price_{self.tee.pk}": ""},
-        )
+    def test_what_was_not_picked_is_not_for_sale(self):
+        blank = make_blank(sizes=("S", "M", "2XL"))
+        self.client.post(self.add_url(), {
+            "style": blank.pk, "price": "25.50", "colors": ["Black"], "sizes": ["S"],
+        })
+        offering = self.store.offerings.get()
+        self.assertNotIn("2XL", [v.size for v in offering.variants()])
+
+    def test_a_price_is_required(self):
+        response = self.client.post(self.add_url(), {
+            "style": self.tee.pk, "colors": ["Black"], "sizes": ["M"],
+        })
         self.assertEqual(self.store.offerings.count(), 0)
-        self.assertContains(response, "Set the price buyers pay")
+        self.assertContains(response, "This field is required")
 
-    def test_add_all_skips_blanks_already_in_the_store_and_inactive_ones(self):
-        make_blank_offering(self.store, self.hoodie, price="30.00")
-        self.client.post(
-            reverse("console:store_products_add", args=[self.store.pk]),
-            {"add_all": "1", f"price_{self.tee.pk}": "22.00"},
-        )
-        self.assertEqual(
-            sorted(self.store.offerings.values_list("blank__merch_label", flat=True)), ["Hoodie", "Tee"]
-        )
-        self.assertEqual(self.store.offerings.get(blank=self.hoodie).price, Decimal("30.00"))
-
-    def test_adding_nothing_tells_staff_what_to_do(self):
-        response = self.client.post(
-            reverse("console:store_products_add", args=[self.store.pk]), {"add_selected": "1"}, follow=True
-        )
+    def test_colours_and_sizes_are_required(self):
+        response = self.client.post(self.add_url(), {"style": self.tee.pk, "price": "20.00"})
         self.assertEqual(self.store.offerings.count(), 0)
-        self.assertContains(response, "Tick the products you want to add")
+        self.assertContains(response, "Which colours does this store sell?")
+
+    def test_a_combination_that_does_not_exist_is_refused_in_plain_words(self):
+        # Youth colours often only come in youth sizes; crossing them with adult sizes yields
+        # nothing, and "no variants matched" would mean nothing to a PTA parent.
+        blank = make_blank(color="Forest", sizes=("YS", "YM"))
+        other = make_blank(color="Navy", sizes=("L",))
+        blank.variants.create(blank_sku="X-Navy-L", color_name="Navy", size="L", is_active=False)
+        response = self.client.post(self.add_url(), {
+            "style": blank.pk, "price": "20.00", "colors": ["Forest"], "sizes": ["YS"],
+        })
+        self.assertEqual(self.store.offerings.count(), 1)
+        self.assertEqual(other.store_offerings.count(), 0)
+        self.assertEqual(response.status_code, 302)
 
     def test_a_bad_price_adds_nothing(self):
-        response = self.client.post(
-            reverse("console:store_products_add", args=[self.store.pk]),
-            {"add_selected": "1", f"add_{self.tee.pk}": "on", f"price_{self.tee.pk}": "-5"},
-        )
+        response = self.client.post(self.add_url(), {
+            "style": self.tee.pk, "price": "-5", "colors": ["Black"], "sizes": ["M"],
+        })
         self.assertEqual(self.store.offerings.count(), 0)
-        self.assertContains(response, "Nothing was added")
+        self.assertContains(response, "greater than or equal to 0")
 
     def test_inline_edits_save_price_active_and_order(self):
         offering = make_blank_offering(self.store, self.hoodie, price="40.00")
@@ -566,6 +604,9 @@ class ConsoleAccessTests(TestCase):
             "store_products": [self.store.pk],
             "store_products_add": [self.store.pk],
             "store_orders_csv": [self.store.pk],
+            "catalog": [],
+            "catalog_refresh": [],
+            "catalog_search": [],
             "store_share_kit": [self.store.pk],
             "orders": [],
             "orders_bulk": [],
@@ -613,7 +654,7 @@ class ConsoleAccessTests(TestCase):
         post_only = {
             "store_products", "store_products_add", "orders_bulk", "order_status",
             "team_member_status", "team_resend_invite", "order_resend_confirmation", "email_retry",
-            "store_share_kit",
+            "store_share_kit", "catalog_refresh",
         }
         for name, args in self.staff_urls().items():
             if name in post_only:
@@ -739,3 +780,56 @@ class GroupStoreCSVTests(TestCase):
         response = self.client.get(reverse("console:store_orders_csv", args=[store.pk]))
         row = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))[1]
         self.assertEqual(row[14:], ["individual_ship", "", "0.00", "", ""])
+
+
+class CatalogPageTests(TestCase):
+    """The Catalog page replaces the old Products nav: read-only, with a refresh button."""
+
+    def setUp(self):
+        self.client.force_login(make_staff())
+        self.hoodie = make_blank(merch_label="Hoodie", supplier_style_code="HOOD1")
+        self.retired = make_blank(merch_label="Old Jacket", supplier_style_code="JKT1", is_active=False)
+
+    def test_it_lists_what_the_sync_pulled(self):
+        page = self.client.get(reverse("console:catalog"))
+        self.assertContains(page, "Hoodie")
+        self.assertContains(page, "HOOD1")
+
+    def test_archived_blanks_are_hidden_until_asked_for(self):
+        self.assertNotContains(self.client.get(reverse("console:catalog")), "Old Jacket")
+        self.assertContains(self.client.get(reverse("console:catalog"), {"active": "0"}), "Old Jacket")
+
+    def test_it_says_which_stores_sell_a_blank(self):
+        make_blank_offering(make_store(), self.hoodie)
+        page = self.client.get(reverse("console:catalog"))
+        rows = {b.pk: b.used_by for b in page.context["object_list"]}
+        self.assertEqual(rows[self.hoodie.pk], 1)
+
+    def test_it_says_so_when_nothing_has_synced(self):
+        Blank.objects.all().delete()
+        self.assertContains(self.client.get(reverse("console:catalog")), "Nothing synced yet")
+
+    def test_refreshing_without_an_ops_link_says_so_rather_than_failing(self):
+        response = self.client.post(reverse("console:catalog_refresh"), follow=True)
+        self.assertContains(response, "isn&#x27;t configured")
+
+    @override_settings(OPS_API_URL="https://ops.test", OPS_API_TOKEN="svc_test")
+    def test_refreshing_reports_what_changed(self):
+        with patch("console.views.sync_catalog") as sync:
+            sync.return_value = SimpleNamespace(styles=3, created=1, deactivated=[])
+            response = self.client.post(reverse("console:catalog_refresh"), follow=True)
+        self.assertContains(response, "3 styles checked, 1 new")
+
+    @override_settings(OPS_API_URL="https://ops.test", OPS_API_TOKEN="svc_test")
+    def test_a_refresh_that_fails_says_why(self):
+        with patch("console.views.sync_catalog", side_effect=OpsTemporaryError("ops fell over")):
+            response = self.client.post(reverse("console:catalog_refresh"), follow=True)
+        self.assertContains(response, "ops fell over")
+
+    def test_the_nav_points_at_the_catalog_not_the_old_products_page(self):
+        page = self.client.get(reverse("console:dashboard"))
+        self.assertContains(page, reverse("console:catalog"))
+        self.assertNotContains(page, f'href="{reverse("console:products")}"')
+
+    def test_the_legacy_page_says_what_it_is(self):
+        self.assertContains(self.client.get(reverse("console:products")), "old hand-made catalog")
